@@ -58,3 +58,42 @@ run(async (t) => {
   await t.until(async () => (await t.count("div.fixed.z-50.overflow-hidden")) === 1)
   t.eq(await t.count("div.fixed.z-50.overflow-hidden"), 1, "关闭一个后剩一个")
 })
+
+/** 回归：开启第一个浮窗后，在同一消息的另一段文字上仍能弹出追问气泡 */
+function regressionSameMessage() {
+  const { run } = require("./test-harness.cjs")
+  return run(async (t) => {
+    await t.seed()
+    await t.selectIn("m2")
+    await t.page.locator("[data-qa='bubble']").getByRole("button", { name: /追问/ }).click()
+    await t.page.waitForTimeout(300)
+    t.eq(await t.count("[data-qa='window']"), 1, "第一个窗口已打开")
+
+    // 在同一消息里选另一段文字
+    const picked = await t.page.evaluate(() => {
+      const holder = document.querySelector("[data-message-id='m2']")
+      const nodes = []
+      const w = document.createTreeWalker(holder, NodeFilter.SHOW_TEXT)
+      let n
+      while ((n = w.nextNode())) if (n.textContent.trim().length > 4) nodes.push(n)
+      if (nodes.length < 2) return null
+      const node = nodes[1]
+      const r = document.createRange()
+      r.setStart(node, 0)
+      r.setEnd(node, Math.min(8, node.textContent.length))
+      const s = window.getSelection()
+      s.removeAllRanges()
+      s.addRange(r)
+      document.dispatchEvent(new Event("selectionchange"))
+      return node.textContent.slice(0, 12)
+    })
+    t.ok(picked, "找到同消息内的第二段文字")
+    await t.page.waitForTimeout(300)
+    t.eq(await t.count("[data-qa='bubble']"), 1, "同消息另选文字仍弹出气泡")
+    t.eq(await t.count("[data-qa='window']"), 1, "原窗口保留")
+  })
+}
+
+if (require.main === module && process.env.CASE === "regression") {
+  regressionSameMessage()
+}

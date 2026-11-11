@@ -24,8 +24,12 @@ interface Instance {
 }
 
 let seq = 0
-/** 去重键：同一对话同一消息下的选区视为同一个悬浮窗 */
-const sigOf = (c: SelectionContext) => `${c.conversationId}:${c.messageId}`
+/**
+ * 去重键：同一对话 + 同一消息 + 同一段文本 才视为同一个悬浮窗。
+ * 只按 messageId 去重会导致「在同一消息里另选一段」时气泡不出来。
+ */
+const sigOf = (c: SelectionContext) =>
+  `${c.conversationId}:${c.messageId}:${c.text.trim()}`
 
 /**
  * 悬浮追问层：管理多个悬浮窗实例。
