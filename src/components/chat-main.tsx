@@ -25,7 +25,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Markdown, TypingCursor } from "@/components/markdown"
-import { useStickToBottom } from "@/hooks/use-scroll"
+import { useSelectionWatcher, useStickToBottom } from "@/hooks/use-scroll"
+import { SelectionQuickAsk } from "@/components/selection-quick-ask"
 import type { ChatStore } from "@/hooks/use-chat-store"
 import type { Conversation, Message } from "@/lib/types"
 import { MODELS } from "@/lib/types"
@@ -59,6 +60,12 @@ export function ChatMain({ store, onOpenSettings }: Props) {
   const lastContent = messages[messages.length - 1]?.content ?? ""
   const { ref: scrollRef } = useStickToBottom(
     `${activeConversation?.id ?? ""}:${messages.length}:${lastContent.length}`
+  )
+
+  // 选区追问
+  const { selection, clear: clearSelection } = useSelectionWatcher(
+    scrollRef,
+    !!activeConversation && !isStreaming
   )
 
   return (
@@ -177,6 +184,23 @@ export function ChatMain({ store, onOpenSettings }: Props) {
           </div>
         </div>
       </div>
+
+      <SelectionQuickAsk
+        selection={
+          selection && activeConversation
+            ? { ...selection, conversationId: activeConversation.id }
+            : null
+        }
+        store={store}
+        onQuoteFavorite={(ctx) => {
+          const existing = store.favoriteOf(ctx.conversationId, ctx.messageId)
+          if (!existing) {
+            store.toggleFavorite(ctx.conversationId, ctx.messageId)
+          }
+          toast.success("已收藏这段内容")
+          clearSelection()
+        }}
+      />
     </main>
   )
 }
@@ -272,7 +296,7 @@ function MessageBubble({
 
   if (isUser) {
     return (
-      <div className="group/msg flex flex-col items-end">
+      <div className="group/msg flex flex-col items-end" data-message-id={message.id}>
         <div className="max-w-[85%]">
           <div className="rounded-2xl rounded-br-md bg-secondary px-4 py-2.5 text-sm whitespace-pre-wrap break-words text-secondary-foreground">
             {message.content}
@@ -318,7 +342,7 @@ function MessageBubble({
   }
 
   return (
-    <div className="group/msg">
+    <div className="group/msg" data-message-id={message.id}>
       <div className="mb-1.5 flex items-center gap-2">
         <div className="flex size-5 items-center justify-center rounded-md bg-foreground text-[10px] font-bold text-background">
           DS

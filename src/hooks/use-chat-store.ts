@@ -390,6 +390,33 @@ export function useChatStore() {
     }))
   }, [])
 
+  /** 原子地「收藏并写入备注」：已收藏则更新备注，未收藏则新建 */
+  const favoriteWithNote = useCallback(
+    (convId: string, messageId: string, note: string) => {
+      setState((prev) => {
+        const existing = prev.favorites.find(
+          (f) => f.conversationId === convId && f.messageId === messageId
+        )
+        if (existing) {
+          return {
+            ...prev,
+            favorites: prev.favorites.map((f) =>
+              f.id === existing.id ? { ...f, note } : f
+            ),
+          }
+        }
+        return {
+          ...prev,
+          favorites: [
+            ...prev.favorites,
+            { ...createFavorite(convId, messageId), note },
+          ],
+        }
+      })
+    },
+    []
+  )
+
   /** 批量取消收藏 */
   const removeFavorites = useCallback((ids: string[]) => {
     const set = new Set(ids)
@@ -691,8 +718,21 @@ export function useChatStore() {
    * 新对话包含该消息及其之前的全部历史，与源对话从此独立。
    */
   const branchFrom = useCallback(
-    (convId: string, messageId: string) => {
+    (
+      convId: string,
+      messageId: string,
+      options?: {
+        /** 追加到分支末尾的消息（如悬浮追问的问答） */
+        append?: Array<{ role: "user" | "assistant"; content: string }>
+        /** 覆盖分支标题 */
+        title?: string
+        /** 是否跳转过去，默认 true */
+        activate?: boolean
+      }
+    ) => {
       let newConvId: string | null = null
+      const append = options?.append ?? []
+      const activate = options?.activate ?? true
 
       setState((prev) => {
         const source = prev.conversations.find((c) => c.id === convId)
@@ -706,6 +746,11 @@ export function useChatStore() {
         const branch = createConversation(source.projectId)
         newConvId = branch.id
 
+        const extra: Message[] = append.map((a) => ({
+          ...newMessage(a.role, a.content),
+          createdAt: now,
+        }))
+
         return {
           ...prev,
           conversations: [
@@ -713,12 +758,19 @@ export function useChatStore() {
             {
               ...branch,
               // 深拷贝并重新分配 id，避免分支间引用同一消息对象
-              messages: inherited.map((m) => ({
-                ...m,
-                id: uid("msg"),
-                streaming: false,
-              })),
-              title: `${source.title}（分支）`,
+              messages: [
+                ...inherited.map((m) => ({
+                  ...m,
+                  id: uid("msg"),
+                  streaming: false,
+                })),
+                ...extra,
+              ],
+              title:
+                options?.title ??
+                (append.length > 0
+                  ? `${source.title}（追问）`
+                  : `${source.title}（分支）`),
               createdAt: now,
               updatedAt: now,
               branchedFrom: {
@@ -729,7 +781,7 @@ export function useChatStore() {
             },
           ],
           activeProjectId: source.projectId,
-          activeConversationId: branch.id,
+          activeConversationId: activate ? branch.id : prev.activeConversationId,
         }
       })
 
@@ -785,6 +837,7 @@ export function useChatStore() {
     toggleFavorite,
     setFavoriteTags,
     setFavoriteNote,
+    favoriteWithNote,
     removeFavorites,
     tagFavorites,
     addTag,
