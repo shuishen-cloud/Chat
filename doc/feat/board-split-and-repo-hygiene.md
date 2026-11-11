@@ -42,3 +42,38 @@
 - 对外行为不变，`BoardPanel` 首次打开时多一次 chunk 加载（有 loading 占位）。
 - `dist` 从 409MB 降到 11MB；首屏 JS 从 983KB 降到 772KB。
 - `.pdm/` 是开发流程记录，与 `doc/feat/*.md` 同属一套体系，应入库。
+
+## 收尾记录
+
+### 实现结果
+
+| 组件 | 原行数 | 迁往 |
+|---|---|---|
+| `EdgeEditor` | 148 | `components/board/edge-editor.tsx` |
+| `NodeHueButton` | 40 | `components/board/node-hue-button.tsx` |
+| `HistoryList` + `formatRunTime` | 125 | `components/board/history-list.tsx` |
+
+`board-canvas.tsx`：1256 → 927 行。
+
+`NodeHandles` 保留在画布内：仅 25 行，且依赖 `SIDES` / `POSITION` 内部常量，
+拆出去要额外导出内部细节，耦合反而更差。
+
+### 体积变化
+
+| 指标 | 前 | 后 |
+|---|---|---|
+| `dist` 总大小 | 409MB | 11MB |
+| 首屏 JS | 983KB (gzip 307KB) | 772KB (gzip 240KB) |
+| 画板 chunk | 无（打进首屏） | 213KB (gzip 68KB)，按需加载 |
+
+### 校验
+
+- `tsc -b`：0 错误
+- `oxlint`：11 警告（无新增）
+- Playwright：43/43 通过
+- `npm run build`：chunk 正确拆分，dist 11MB
+
+### 新增回归用例
+
+`boardLazyLoads`：验证懒加载占位被真实画布替换、不残留 loading，
+且拆出的 `EdgeEditor` 仍可正常打开。
