@@ -129,4 +129,38 @@ DeepSeek 官方 API 目前**没有公开的思考强度参数**，本项目此�
 
 ## 实现与校验结果
 
-（收尾阶段补充）
+### 落地情况
+
+| 设计点 | 实现位置 |
+|---|---|
+| 色板与取色函数（含暗色分支） | `src/lib/hue.ts` |
+| 共享取色器 | `src/components/hue-picker.tsx` |
+| 主题读取 | `src/hooks/use-is-dark.ts` |
+| 单线执行（与任务共用 execEdge） | `src/hooks/use-chat-store.ts::runEdge` |
+| 键盘执行 | `src/components/board-canvas.tsx`（window keydown） |
+| 思考开关 | `deepseek.ts::StreamOptions.thinkingEnabled`、`settings-dialog.tsx` |
+| 历史卡片化 | `src/components/board-canvas.tsx::HistoryList` |
+
+### 与设计的偏差
+
+**单线执行复用了 `execEdge`，但没有完全合并 `runTask`。**
+`runTask` 额外负责"多线写入同一节点时拼接"的 `writtenTargets` 集合，
+而 `runEdge` 每次都是全新集合。二者共用 `execEdge`，行为一致但汇总逻辑分开。
+
+**思考开关退化为展示层开关。** 见下方"已知限制"。
+
+### 校验
+
+- `scripts/test-board.cjs`：31 个用例通过，本 feat 新增 7 个：
+  `colorMarks`、`colorConversation`、`hueDarkContrast`、`runSingleEdge`、
+  `runEdgeKeyboard`、`thinkingToggle`、`historyRendering`
+- `scripts/test-quick-ask.cjs`：11 个通过（无回归）
+- `npm run build`、`npx tsc -b`、`npm run lint`（新增文件 0 告警）
+
+### 已知限制
+
+1. **思考开关不改变服务端行为。** DeepSeek 未公开该参数，本地也无 API Key 可实测，
+   因此关闭时**不发送任何非标字段**，只在客户端丢弃 `reasoning_content`。
+   设置面板已写明这一点。若将来确认支持，只需在 `streamChat` 补一个字段。
+2. **颜色为 8 个固定预设**，不支持任意取色。
+3. 键盘执行依赖"最近点选过的线"，点击画布空白处不会清除该记忆。
