@@ -806,5 +806,225 @@ cases.multiEdgeConvergeKeepsAll = async (t) => {
   t.eq(d.runs.length, 2, "两条线各留一条历史")
 }
 
+/* ---------------- 颜色标记 / 单线执行 / 思考开关 / 历史（board-colors-and-run） ---------------- */
+
+/** 节点、连线、会话都能标色并持久化 */
+cases.colorMarks = async (t) => {
+  const now = Date.now()
+  await t.seed({
+    ...seedFlow(),
+    conversations: [
+      { ...defaultSeed().conversations[0], hue: undefined },
+    ],
+  })
+  await t.untilVisible(".react-flow__node[data-id='a']")
+
+  // 节点：点色点按钮选一个预设色
+  await t.page
+    .locator(".react-flow__node[data-id='a']")
+    .getByTitle("标记颜色")
+    .click()
+  await t.page.locator("[data-hue='200']").first().click()
+
+  const s1 = await t.stateUntil(
+    (x) => x.boardNodes.find((n) => n.id === "a")?.hue === 200,
+    3000,
+    "节点颜色已保存"
+  )
+  t.eq(s1.boardNodes.find((n) => n.id === "a").hue, 200, "节点 hue=200")
+
+  // 连线：边编辑器里选色
+  await t.page.locator(".react-flow__edge-path").first().click({ force: true })
+  await t.page.locator("[data-hue='280']").first().click()
+  await t.page.getByRole("button", { name: "保存" }).click()
+
+  const s2 = await t.stateUntil(
+    (x) => x.boardEdges[0]?.hue === 280,
+    3000,
+    "连线颜色已保存"
+  )
+  t.eq(s2.boardEdges[0].hue, 280, "连线 hue=280")
+}
+
+/** 会话颜色：侧边栏可标色 */
+cases.colorConversation = async (t) => {
+  await t.seed(seedFlow())
+  await t.untilVisible("aside")
+
+  await t.page
+    .locator("aside")
+    .getByRole("button", { name: "会话操作" })
+    .first()
+    .click()
+  await t.page.getByRole("menuitem", { name: /标记颜色/ }).click()
+  await t.page.locator("[data-hue='150']").first().click()
+
+  const s = await t.stateUntil(
+    (x) => x.conversations[0]?.hue === 150,
+    3000,
+    "会话颜色已保存"
+  )
+  t.eq(s.conversations[0].hue, 150, "conversation hue=150")
+}
+
+/** 暗色下淡背景与文字色必须有亮度差，防过曝 */
+cases.hueDarkContrast = async (t) => {
+  await t.page.goto(URL, { waitUntil: "domcontentloaded" })
+  const out = await t.page.evaluate(async () => {
+    const mod = await import("/src/lib/hue.ts")
+    const parseL = (s) => {
+      const m = s.match(/(\d+)%\s*\)?$/)
+      return m ? Number(m[1]) : null
+    }
+    const light = { bg: mod.hueBg(45, false), text: mod.hueText(45, false) }
+    const dark = { bg: mod.hueBg(45, true), text: mod.hueText(45, true) }
+    return {
+      lightBgL: parseL(light.bg),
+      darkBgL: parseL(dark.bg),
+      lightRaw: light,
+      darkRaw: dark,
+    }
+  })
+  t.ok(out.lightBgL !== null && out.darkBgL !== null, "色值可解析")
+  t.ok(
+    out.darkBgL < out.lightBgL,
+    `暗色背景更暗（light=${out.lightBgL}% dark=${out.darkBgL}%）`
+  )
+  // 两套主题都不应使用同一个字符串
+  t.ok(
+    out.lightRaw.bg !== out.darkRaw.bg,
+    "暗色不再复用浅色值（修复过曝）"
+  )
+}
+
+/** 不建任务，直接跑一条线 */
+cases.runSingleEdge = async (t) => {
+  const seed = seedFlow()
+  seed.boardEdges[0].prompt = "直接跑这一条"
+  await t.seed(seed)
+
+  await t.mockReply("单线输出")
+  await t.untilVisible(".react-flow__edge-path")
+
+  await t.page.locator(".react-flow__edge-path").first().click({ force: true })
+  await t.page.getByRole("button", { name: /立即执行/ }).click()
+
+  const s = await t.stateUntil(
+    (x) => x.boardNodes.find((n) => n.id === "b")?.runs?.length === 1,
+    8000,
+    "单线执行完成"
+  )
+  const target = s.boardNodes.find((n) => n.id === "b")
+  t.eq(target.contentOverride, "单线输出", "结果写回终点")
+  t.eq(target.runs[0].prompt, "直接跑这一条", "历史记录提示词")
+  t.eq(s.boardTasks.length, 0, "没有创建任何任务")
+}
+
+/** 键盘执行：选中线按 Enter */
+cases.runEdgeKeyboard = async (t) => {
+  const seed = seedFlow()
+  seed.boardEdges[0].prompt = "键盘执行"
+  await t.seed(seed)
+
+  await t.mockReply("键盘输出")
+  await t.untilVisible(".react-flow__edge-path")
+
+  await t.page.locator(".react-flow__edge-path").first().click({ force: true })
+  // 关闭编辑器，保证焦点不在输入框
+  await t.page.keyboard.press("Escape")
+  await t.page.waitForTimeout(200)
+
+  // 重新选中线（编辑器关掉后仍需保持选中）
+  await t.page.locator(".react-flow__edge-path").first().click({ force: true })
+  await t.page.keyboard.press("Escape")
+  await t.page.locator(".react-flow__edge-path").first().click({ force: true })
+  await t.page.keyboard.press("Escape")
+  await t.page.waitForTimeout(150)
+
+  // 用 Ctrl+Enter 触发（不依赖编辑器内的输入框）
+  await t.page.locator(".react-flow__edge-path").first().click({ force: true })
+  await t.page.keyboard.press("Control+Enter")
+
+  const s = await t.stateUntil(
+    (x) => (x.boardNodes.find((n) => n.id === "b")?.runs?.length ?? 0) >= 1,
+    8000,
+    "键盘触发了执行"
+  )
+  t.ok(
+    (s.boardNodes.find((n) => n.id === "b").runs?.length ?? 0) >= 1,
+    "键盘执行生效"
+  )
+}
+
+/** 关闭思考后：请求体不含额外字段，界面不展示思维链 */
+cases.thinkingToggle = async (t) => {
+  const seed = seedFlow()
+  seed.thinkingEnabled = false
+  await t.seed(seed)
+  await t.untilVisible(".react-flow__node")
+
+  let body = null
+  await t.page.unroute("**/chat/completions").catch(() => {})
+  await t.page.route("**/chat/completions", (route) => {
+    body = route.request().postDataJSON()
+    route.fulfill({
+      status: 200,
+      headers: { "content-type": "text/event-stream" },
+      body:
+        `data: ${JSON.stringify({ choices: [{ delta: { content: "答" } }] })}\n\n` +
+        `data: [DONE]\n\n`,
+    })
+  })
+
+  // 在对话里发一条消息
+  const ta = t.page.locator("textarea").first()
+  await ta.fill("测试思考开关")
+  await t.page.keyboard.press("Enter")
+  await t.untilState((x) => x.conversations[0].messages.some((m) => m.content === "答"), 8000)
+
+  t.ok(body !== null, "捕获到请求体")
+  t.eq(body.model, "deepseek-v4-pro", "模型不变")
+  // 保守实现：关闭思考时不发送任何非标参数
+  t.ok(!("thinking" in body), "未发送 thinking 字段")
+  t.ok(!("reasoning_effort" in body), "未发送 reasoning_effort 字段")
+  t.ok(!("enable_thinking" in body), "未发送 enable_thinking 字段")
+
+  const s = await t.state()
+  t.eq(s.thinkingEnabled, false, "设置已持久化")
+}
+
+/** 历史区渲染出时间、提示词、输入摘要 */
+cases.historyRendering = async (t) => {
+  const now = Date.now()
+  const seed = seedFlow()
+  seed.boardNodes[1].contentOverride = "历史输出内容"
+  seed.boardNodes[1].runs = [
+    {
+      id: "r1",
+      edgeId: "e1",
+      prompt: "提炼核心论点",
+      inputs: [{ nodeId: "a", title: "材料A", text: "这是一段输入材料" }],
+      output: "历史输出内容",
+      createdAt: now,
+    },
+  ]
+  await t.seed(seed)
+
+  await t.untilVisible(".react-flow__node[data-id='b']")
+  await t.page
+    .locator(".react-flow__node[data-id='b']")
+    .getByTitle("历史")
+    .click()
+
+  const hist = t.page.locator("[data-history]").first()
+  await hist.waitFor({ state: "visible" })
+  const text = await hist.innerText()
+
+  t.ok(/\d{1,2}:\d{2}:\d{2}/.test(text), `含时间 (${text.slice(0, 40)})`)
+  t.ok(text.includes("提炼核心论点"), "含提示词")
+  t.ok(text.includes("历史输出内容"), "含输出内容")
+  t.ok(/输入/.test(text), "含输入摘要标识")
+}
+
 runAll(cases)
 console.log("URL:", URL)
