@@ -1,0 +1,39 @@
+{
+  "commit": "e920562b",
+  "notes": [
+    {
+      "commit": "e920562b",
+      "kind": "difficulty",
+      "title": "颜色标记要同时适配明暗两套主题",
+      "detail": "项目原有 Tag 配色只写了浅色（hsl(hue 85% 92%)），暗色主题下会过曝刺眼。新增 hue.ts 时每个取色函数都强制给出 dark 分支：背景暗色取 l=16%，文字取 l=82%，描边取 l=34%。并加 hueDarkContrast 用例断言 darkBgL < lightBgL 且两主题字符串不同，防止有人日后把 dark 分支删掉。",
+      "author": "human:unknown",
+      "files": [
+        "src/lib/hue.ts"
+      ],
+      "severity": "high",
+      "status": "noted",
+      "catches": [],
+      "verifications": [
+        {
+          "kind": "test",
+          "target": "scripts/test-board.cjs",
+          "command": "",
+          "method": "CASE=hueDarkContrast node scripts/test-board.cjs",
+          "script": "",
+          "expected": "passed",
+          "note": "",
+          "cwd": "",
+          "last_run_at": null,
+          "last_status": "unknown",
+          "last_output": ""
+        }
+      ],
+      "issue_id": null,
+      "resolves": [],
+      "tags": [
+        "board-colors-and-run"
+      ],
+      "created_at": "2026-11-11T12:58:40.553996+00:00"
+    }
+  ]
+}

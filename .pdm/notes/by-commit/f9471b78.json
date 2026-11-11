@@ -1,0 +1,39 @@
+{
+  "commit": "f9471b78",
+  "notes": [
+    {
+      "commit": "f9471b78",
+      "kind": "pitfall",
+      "title": "沿节点四边铺透明热区会抢走节点拖动",
+      "detail": "为实现「任意边沿都能拉线」，曾沿四边各铺一组透明 Handle 热区，并放开 pointer-events。结果节点的 pointerdown 被热区吃掉，dragPersistsPosition / dragFollowsPointerMidway 立刻失败——节点拖不动了。改成保留四向手柄、仅用 CSS ::after 把命中区从 7px 扩到 26px，配合 connectionMode=Loose 解决方向限制，既好点又不影响拖动。",
+      "author": "human:unknown",
+      "files": [
+        "src/components/board-canvas.tsx"
+      ],
+      "severity": "high",
+      "status": "noted",
+      "catches": [],
+      "verifications": [
+        {
+          "kind": "test",
+          "target": "scripts/test-board.cjs",
+          "command": "",
+          "method": "CASE=dragPersistsPosition node scripts/test-board.cjs",
+          "script": "",
+          "expected": "passed",
+          "note": "",
+          "cwd": "",
+          "last_run_at": null,
+          "last_status": "unknown",
+          "last_output": ""
+        }
+      ],
+      "issue_id": null,
+      "resolves": [],
+      "tags": [
+        "board-note-md-and-ux"
+      ],
+      "created_at": "2026-11-11T13:28:46.196298+00:00"
+    }
+  ]
+}

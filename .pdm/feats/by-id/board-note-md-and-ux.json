@@ -1,0 +1,202 @@
+{
+  "slug": "board-note-md-and-ux",
+  "title": "便签 Markdown 渲染、执行中边动画、整边可拖连线、画板宽度可调",
+  "kind": "feat",
+  "status": "closed",
+  "doc": "feat/board-note-md-and-ux.md",
+  "api": [
+    "boardWidth 持久化；executing 边样式"
+  ],
+  "logs": [
+    "执行中边的 id 集合"
+  ],
+  "fallbacks": [
+    "便签未编辑时渲染 Markdown，编辑时退回纯文本；宽度限制在上下界内"
+  ],
+  "design_note": "便签改为渲染态+编辑态双模式；正在执行的边用 stroke-dashoffset 动画；连线不再依赖手柄命中点，改为 Loose 连接模式并在节点边缘整体可拖；画板宽度可拖拽调整并持久化",
+  "impl_note": "NoteNode 增加 editing 状态与 Markdown 渲染；flowEdges 按 runningEdgeIds 加 executing 类名；ReactFlow 设 connectionMode=Loose 并为节点四边加透明热区；BoardPanel 加拖拽分隔条，宽度存 localStorage",
+  "data_model": [
+    "BoardEdge 不变；新增 UI 态 boardWidth:number；NodeRun 不变"
+  ],
+  "samples": [
+    "{\"runningEdgeIds\":[\"e1\"],\"boardWidth\":620}"
+  ],
+  "changes": [
+    "src/components/board-canvas.tsx::NoteNode —— 便签 Markdown 渲染与编辑切换",
+    "src/components/board-canvas.tsx::InnerFlow —— Loose 连接模式与整边热区",
+    "src/components/board-panel.tsx::BoardPanel —— 宽度拖拽调整"
+  ],
+  "test_note": "scripts/test-board.cjs 新增便签 Markdown、执行动画、整边拖线、宽度调整用例",
+  "debug_note": "",
+  "extend_note": "",
+  "impact": "仅 UI 与交互，数据字段向后兼容",
+  "importance": "high",
+  "commits": [
+    "eb59ed430ce13b4cce9590afa484d67fec66dc73",
+    "d7824d86ad4b7e70c057e1022a395ab4f5624ae8",
+    "f9471b78a657721d160f08bbef6d570e957dfb4d",
+    "94cf2202177c43563062663eb8866e291bf02d36",
+    "acbe47ea069ae0e54f2d45963c7432768efce1a3"
+  ],
+  "notes": [],
+  "discovered": [],
+  "stage": "close",
+  "reviews": {
+    "doc": {
+      "reviewed": true,
+      "reviewed_by": "lwy",
+      "reviewed_at": "2026-11-11T13:28:35.732208+00:00",
+      "tested": false,
+      "test_command": "",
+      "test_status": "",
+      "tested_at": null
+    },
+    "design_note": {
+      "reviewed": true,
+      "reviewed_by": "lwy",
+      "reviewed_at": "2026-11-11T13:28:35.732225+00:00",
+      "tested": false,
+      "test_command": "",
+      "test_status": "",
+      "tested_at": null
+    },
+    "impl_note": {
+      "reviewed": true,
+      "reviewed_by": "lwy",
+      "reviewed_at": "2026-11-11T13:28:35.732236+00:00",
+      "tested": false,
+      "test_command": "",
+      "test_status": "",
+      "tested_at": null
+    },
+    "test_note": {
+      "reviewed": true,
+      "reviewed_by": "lwy",
+      "reviewed_at": "2026-11-11T13:28:35.732246+00:00",
+      "tested": false,
+      "test_command": "",
+      "test_status": "",
+      "tested_at": null
+    },
+    "impact": {
+      "reviewed": true,
+      "reviewed_by": "lwy",
+      "reviewed_at": "2026-11-11T13:28:35.732256+00:00",
+      "tested": false,
+      "test_command": "",
+      "test_status": "",
+      "tested_at": null
+    },
+    "importance": {
+      "reviewed": true,
+      "reviewed_by": "lwy",
+      "reviewed_at": "2026-11-11T13:28:35.732265+00:00",
+      "tested": false,
+      "test_command": "",
+      "test_status": "",
+      "tested_at": null
+    },
+    "api:0": {
+      "reviewed": true,
+      "reviewed_by": "lwy",
+      "reviewed_at": "2026-11-11T13:28:35.732275+00:00",
+      "tested": false,
+      "test_command": "",
+      "test_status": "",
+      "tested_at": null
+    },
+    "logs:0": {
+      "reviewed": true,
+      "reviewed_by": "lwy",
+      "reviewed_at": "2026-11-11T13:28:35.732285+00:00",
+      "tested": false,
+      "test_command": "",
+      "test_status": "",
+      "tested_at": null
+    },
+    "fallbacks:0": {
+      "reviewed": true,
+      "reviewed_by": "lwy",
+      "reviewed_at": "2026-11-11T13:28:35.732294+00:00",
+      "tested": false,
+      "test_command": "",
+      "test_status": "",
+      "tested_at": null
+    },
+    "data_model:0": {
+      "reviewed": true,
+      "reviewed_by": "lwy",
+      "reviewed_at": "2026-11-11T13:28:35.732303+00:00",
+      "tested": false,
+      "test_command": "",
+      "test_status": "",
+      "tested_at": null
+    },
+    "samples:0": {
+      "reviewed": true,
+      "reviewed_by": "lwy",
+      "reviewed_at": "2026-11-11T13:28:35.732312+00:00",
+      "tested": false,
+      "test_command": "",
+      "test_status": "",
+      "tested_at": null
+    },
+    "changes:0": {
+      "reviewed": true,
+      "reviewed_by": "lwy",
+      "reviewed_at": "2026-11-11T13:28:35.732322+00:00",
+      "tested": false,
+      "test_command": "",
+      "test_status": "",
+      "tested_at": null
+    },
+    "changes:1": {
+      "reviewed": true,
+      "reviewed_by": "lwy",
+      "reviewed_at": "2026-11-11T13:28:35.732331+00:00",
+      "tested": false,
+      "test_command": "",
+      "test_status": "",
+      "tested_at": null
+    },
+    "changes:2": {
+      "reviewed": true,
+      "reviewed_by": "lwy",
+      "reviewed_at": "2026-11-11T13:28:35.732340+00:00",
+      "tested": false,
+      "test_command": "",
+      "test_status": "",
+      "tested_at": null
+    }
+  },
+  "comments": {},
+  "stage_reviews": {
+    "doc": {
+      "by": "human:lwy",
+      "at": "2026-11-11T13:28:35.882182+00:00",
+      "note": ""
+    },
+    "test": {
+      "by": "human:lwy",
+      "at": "2026-11-11T13:28:35.954015+00:00",
+      "note": ""
+    },
+    "feat": {
+      "by": "human:lwy",
+      "at": "2026-11-11T13:28:36.028178+00:00",
+      "note": ""
+    },
+    "fix": {
+      "by": "human:lwy",
+      "at": "2026-11-11T13:28:36.104904+00:00",
+      "note": ""
+    },
+    "close": {
+      "by": "human:lwy",
+      "at": "2026-11-11T13:28:36.182562+00:00",
+      "note": ""
+    }
+  },
+  "created_at": "2026-11-11T13:11:14.791774+00:00",
+  "updated_at": "2026-11-11T13:28:36.182570+00:00"
+}

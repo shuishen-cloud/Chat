@@ -1,0 +1,107 @@
+{
+  "commit": "5b162332",
+  "notes": [
+    {
+      "commit": "5b162332",
+      "kind": "bug",
+      "title": "多线汇聚到同一节点时结果互相覆盖",
+      "detail": "runTask 逐边执行，每条线都把结果写入终点 contentOverride。多条线指向同一终点时（材料汇聚对比的核心场景），后写入的直接覆盖前一条，导致前一条的产出丢失。改为本次运行内记录 writtenTargets，首次写入直接赋值，后续用 --- 分隔拼接，并带上提示词作为小标题。",
+      "author": "human:unknown",
+      "files": [
+        "src/hooks/use-chat-store.ts"
+      ],
+      "severity": "high",
+      "status": "noted",
+      "catches": [],
+      "verifications": [
+        {
+          "kind": "test",
+          "target": "scripts/test-board.cjs",
+          "command": "",
+          "method": "CASE=multiEdgeConvergeKeepsAll node scripts/test-board.cjs",
+          "script": "",
+          "expected": "passed",
+          "note": "",
+          "cwd": "",
+          "last_run_at": null,
+          "last_status": "unknown",
+          "last_output": ""
+        }
+      ],
+      "issue_id": null,
+      "resolves": [],
+      "tags": [
+        "board-flow-tasks"
+      ],
+      "created_at": "2026-11-11T12:32:27.642123+00:00"
+    },
+    {
+      "commit": "5b162332",
+      "kind": "pitfall",
+      "title": "异步循环里读 state 闭包会拿到旧节点内容",
+      "detail": "runTask 是 async 循环，用 useCallback 闭包里的 state.boardNodes 取起点节点文本。前一条线刚改写过的节点，后一条线读到的仍是旧值。引入 stateRef 始终指向最新 state，并把文本解析抽成纯函数 resolveNodeText(node, conversations) 以便用最新数据计算。",
+      "author": "human:unknown",
+      "files": [
+        "src/hooks/use-chat-store.ts"
+      ],
+      "severity": "high",
+      "status": "noted",
+      "catches": [],
+      "verifications": [
+        {
+          "kind": "test",
+          "target": "scripts/test-board.cjs",
+          "command": "",
+          "method": "CASE=runTaskWritesHistory node scripts/test-board.cjs",
+          "script": "",
+          "expected": "passed",
+          "note": "",
+          "cwd": "",
+          "last_run_at": null,
+          "last_status": "unknown",
+          "last_output": ""
+        }
+      ],
+      "issue_id": null,
+      "resolves": [],
+      "tags": [
+        "board-flow-tasks"
+      ],
+      "created_at": "2026-11-11T12:32:27.703117+00:00"
+    },
+    {
+      "commit": "5b162332",
+      "kind": "bug",
+      "title": "中止任务后仍提示执行成功",
+      "detail": "catch 里用局部 const aborted 判断 AbortError 并 break，但 finally 之后的分支只看 ok/failed，忽略已中止状态，用户点停止仍看到「已执行 N 条线」。改为外层 let aborted，中止时单独提示「已停止，完成了 N 条线」。",
+      "author": "human:unknown",
+      "files": [
+        "src/hooks/use-chat-store.ts"
+      ],
+      "severity": "medium",
+      "status": "noted",
+      "catches": [],
+      "verifications": [
+        {
+          "kind": "command",
+          "target": "",
+          "command": "npm run build",
+          "method": "类型与构建通过",
+          "script": "",
+          "expected": "built in",
+          "note": "",
+          "cwd": "",
+          "last_run_at": null,
+          "last_status": "unknown",
+          "last_output": ""
+        }
+      ],
+      "issue_id": null,
+      "resolves": [],
+      "tags": [
+        "board-flow-tasks"
+      ],
+      "created_at": "2026-11-11T12:32:30.287979+00:00"
+    }
+  ]
+}

@@ -1,0 +1,79 @@
+{
+  "commit": "34d71c5f",
+  "notes": [
+    {
+      "commit": "34d71c5f",
+      "kind": "pitfall",
+      "title": "渲染期间给 ref.current 赋值会触发 react(refs) 告警",
+      "detail": "为让 runTask 的异步循环读到最新 store，用了 stateRef.current = state 与 runEdgeRef.current = onRunEdge，但都在渲染期间赋值，oxlint react(refs) 会告警且违反 React 规则。修法：runEdgeRef 改到 useEffect 里更新；stateRef 则把 setState 包一层，在 setter 内部同步刷新 ref（既不在渲染期写，也不会像 effect 那样晚一帧导致循环读到旧值）。",
+      "author": "human:unknown",
+      "files": [
+        "src/hooks/use-chat-store.ts"
+      ],
+      "severity": "high",
+      "status": "noted",
+      "catches": [],
+      "verifications": [
+        {
+          "kind": "command",
+          "target": "",
+          "command": "npm run lint",
+          "method": "确认 react(refs) 告警为 0",
+          "script": "",
+          "expected": "0",
+          "note": "",
+          "cwd": "",
+          "last_run_at": null,
+          "last_status": "unknown",
+          "last_output": ""
+        }
+      ],
+      "issue_id": null,
+      "resolves": [],
+      "tags": [
+        "board-colors-and-run"
+      ],
+      "created_at": "2026-11-11T12:58:26.561960+00:00"
+    },
+    {
+      "commit": "34d71c5f",
+      "kind": "difficulty",
+      "title": "给 setState 包一层后需补全所有 useCallback 依赖",
+      "detail": "把 useState 的 setState 换成自定义 wrapper 后，全项目 21 处 useCallback 报 missing dependency setState，其中还有 4 处是我用脚本批量替换时误加（beginRun/stopTask/exportMarkdown/setState 自身并不使用 setState）。需逐个人工核对，不能无脑批量替换。",
+      "author": "human:unknown",
+      "files": [
+        "src/hooks/use-chat-store.ts"
+      ],
+      "severity": "medium",
+      "status": "noted",
+      "catches": [],
+      "verifications": [],
+      "issue_id": null,
+      "resolves": [],
+      "tags": [
+        "board-colors-and-run"
+      ],
+      "created_at": "2026-11-11T12:58:26.631809+00:00"
+    },
+    {
+      "commit": "34d71c5f",
+      "kind": "controlled-exception",
+      "title": "思考开关关闭时不发送任何非标参数",
+      "detail": "DeepSeek 未公开思考开关参数，且本地无可用 API Key 无法实测。若贸然发送 thinking.disabled 等字段，有整请求被拒的风险。因此保守处理：关闭时只在客户端丢弃 reasoning_content，不修改请求体。代价是「关闭」不等于减少服务端思考，已在设置文案中如实说明。",
+      "author": "human:unknown",
+      "files": [
+        "src/lib/deepseek.ts"
+      ],
+      "severity": "high",
+      "status": "noted",
+      "catches": [],
+      "verifications": [],
+      "issue_id": null,
+      "resolves": [],
+      "tags": [
+        "board-colors-and-run"
+      ],
+      "created_at": "2026-11-11T12:58:26.709899+00:00"
+    }
+  ]
+}

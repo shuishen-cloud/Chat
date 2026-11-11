@@ -1,0 +1,43 @@
+{
+  "slug": "selection-md-and-batch-board",
+  "title": "划词按DOM结构还原Markdown、消息多选批量进画板、提示词徽章独立配色",
+  "kind": "feat",
+  "status": "draft",
+  "doc": "doc/feat/selection-md-and-batch-board.md",
+  "api": [],
+  "logs": [],
+  "fallbacks": [],
+  "design_note": "selection.toString() 在表格/代码块里会丢结构，改为按 DOM 节点类型重新序列化；结构性元素整块输出，部分选区拆成完整节点+首尾截断；批量进画板用多选模式承载；提示词徽章与线颜色解耦",
+  "impl_note": "新增 lib/selection-to-markdown.ts 做 Range→Markdown；UI 过滤下沉到 serializeInline 最内层；chat-main 加 selectMode/checkedIds；BoardEdge 加 promptHue",
+  "data_model": [
+    "BoardEdge: 新增 promptHue?: number（与 hue 独立）；SelectionContext: 新增 markdown: string"
+  ],
+  "samples": [
+    "{\"text\":\"| 方案 | 体积 |\",\"markdown\":\"| 方案 | 体积 |\\n| --- | --- |\",\"messageId\":\"m1\"}"
+  ],
+  "changes": [
+    "src/lib/selection-to-markdown.ts —— 新增 Range→Markdown 序列化",
+    "src/hooks/use-scroll.ts::useSelectionWatcher —— 返回值新增 markdown",
+    "src/components/chat-main.tsx::ChatMain —— 多选模式与批量加入画板",
+    "src/lib/types.ts::BoardEdge —— 新增 promptHue"
+  ],
+  "test_note": "Playwright 用例 selectionSerializesStructure / selectionAddToBoard / checkboxBatchAdd / promptHue",
+  "debug_note": "",
+  "extend_note": "",
+  "impact": "SelectionContext 结构变更，所有浮窗调用方需改读 markdown；旧 localStorage 数据兼容",
+  "importance": "high",
+  "commits": [
+    "030a1d63bac33d6cd96889d20fa001bf05108610",
+    "fad7e3d13b58afd3064b7a678898e76d226d6772",
+    "263e4af816a85cd5afc0f02a94a19ede40b2f505",
+    "760cbc506b6ba60b0c2dbf94d64c21f3fedff760"
+  ],
+  "notes": [],
+  "discovered": [],
+  "stage": "fix",
+  "reviews": {},
+  "comments": {},
+  "stage_reviews": {},
+  "created_at": "2026-11-11T13:58:28.863999+00:00",
+  "updated_at": "2026-11-11T13:58:47.026024+00:00"
+}

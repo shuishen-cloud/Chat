@@ -1,0 +1,232 @@
+{
+  "slug": "board-colors-and-run",
+  "title": "画板颜色标记、单线执行、思考开关与历史美化",
+  "kind": "feat",
+  "status": "closed",
+  "doc": "feat/board-colors-and-run.md",
+  "api": [
+    "runEdge(edgeId) -> Promise<void>；setHue(target,id,hue)"
+  ],
+  "logs": [
+    "单线执行日志：edgeId、成功/失败；思考开关状态"
+  ],
+  "fallbacks": [
+    "思考关闭时不发额外参数，避免服务端拒绝；颜色为空时回退默认样式"
+  ],
+  "design_note": "颜色标记复用项目已有的 hue 数值建模（TAG_HUES 思路），统一 hue 字段 + 共享 HuePicker；单线执行与任务执行共用 runEdge；思考开关保守实现，关闭时不发额外参数",
+  "impl_note": "新增 src/lib/hue.ts 色板工具与 HuePicker 组件；BoardNode/BoardEdge/Conversation 增加 hue；store 增加 runEdge；deepseek 增加 thinking 开关；节点历史改为结构化卡片",
+  "data_model": [
+    "BoardNode{hue?}; BoardEdge{hue?}; Conversation{hue?}; ChatState{thinkingEnabled:boolean}"
+  ],
+  "samples": [
+    "{\"node\":{\"hue\":200},\"edge\":{\"hue\":280},\"conversation\":{\"hue\":45},\"thinkingEnabled\":false}"
+  ],
+  "changes": [
+    "src/lib/hue.ts::HUE_PRESETS —— 预设色板与取色函数",
+    "src/components/hue-picker.tsx::HuePicker —— 共享取色组件",
+    "src/lib/types.ts::BoardNode.hue —— 节点颜色",
+    "src/lib/types.ts::BoardEdge.hue —— 连线颜色",
+    "src/lib/types.ts::Conversation.hue —— 会话颜色",
+    "src/hooks/use-chat-store.ts::runEdge —— 单线执行"
+  ],
+  "test_note": "scripts/test-board.cjs 新增颜色标记、单线执行、思考开关、历史渲染用例",
+  "debug_note": "",
+  "extend_note": "",
+  "impact": "三者均为可选字段，旧数据无需迁移；thinkingEnabled 默认 true 保持现状",
+  "importance": "high",
+  "commits": [
+    "dcc89d7b590ffb24a3b0c463523608b97d7d37de",
+    "f39e1d36808a3872565f476ccc8482bd1c8fc5cf",
+    "e920562b5ad8496cc3979357797a527bbc98f4e9",
+    "34d71c5f39bc28126397d437401eac56e2a44b39",
+    "3fff3f7f603064d3d78a5e9a7bf3d9047f82335e"
+  ],
+  "notes": [],
+  "discovered": [],
+  "stage": "close",
+  "reviews": {
+    "doc": {
+      "reviewed": true,
+      "reviewed_by": "lwy",
+      "reviewed_at": "2026-11-11T12:58:34.412877+00:00",
+      "tested": false,
+      "test_command": "",
+      "test_status": "",
+      "tested_at": null
+    },
+    "design_note": {
+      "reviewed": true,
+      "reviewed_by": "lwy",
+      "reviewed_at": "2026-11-11T12:58:34.412898+00:00",
+      "tested": false,
+      "test_command": "",
+      "test_status": "",
+      "tested_at": null
+    },
+    "impl_note": {
+      "reviewed": true,
+      "reviewed_by": "lwy",
+      "reviewed_at": "2026-11-11T12:58:34.412912+00:00",
+      "tested": false,
+      "test_command": "",
+      "test_status": "",
+      "tested_at": null
+    },
+    "test_note": {
+      "reviewed": true,
+      "reviewed_by": "lwy",
+      "reviewed_at": "2026-11-11T12:58:34.412926+00:00",
+      "tested": false,
+      "test_command": "",
+      "test_status": "",
+      "tested_at": null
+    },
+    "impact": {
+      "reviewed": true,
+      "reviewed_by": "lwy",
+      "reviewed_at": "2026-11-11T12:58:34.412938+00:00",
+      "tested": false,
+      "test_command": "",
+      "test_status": "",
+      "tested_at": null
+    },
+    "importance": {
+      "reviewed": true,
+      "reviewed_by": "lwy",
+      "reviewed_at": "2026-11-11T12:58:34.412951+00:00",
+      "tested": false,
+      "test_command": "",
+      "test_status": "",
+      "tested_at": null
+    },
+    "api:0": {
+      "reviewed": true,
+      "reviewed_by": "lwy",
+      "reviewed_at": "2026-11-11T12:58:34.412964+00:00",
+      "tested": false,
+      "test_command": "",
+      "test_status": "",
+      "tested_at": null
+    },
+    "logs:0": {
+      "reviewed": true,
+      "reviewed_by": "lwy",
+      "reviewed_at": "2026-11-11T12:58:34.412976+00:00",
+      "tested": false,
+      "test_command": "",
+      "test_status": "",
+      "tested_at": null
+    },
+    "fallbacks:0": {
+      "reviewed": true,
+      "reviewed_by": "lwy",
+      "reviewed_at": "2026-11-11T12:58:34.412989+00:00",
+      "tested": false,
+      "test_command": "",
+      "test_status": "",
+      "tested_at": null
+    },
+    "data_model:0": {
+      "reviewed": true,
+      "reviewed_by": "lwy",
+      "reviewed_at": "2026-11-11T12:58:34.413001+00:00",
+      "tested": false,
+      "test_command": "",
+      "test_status": "",
+      "tested_at": null
+    },
+    "samples:0": {
+      "reviewed": true,
+      "reviewed_by": "lwy",
+      "reviewed_at": "2026-11-11T12:58:34.413013+00:00",
+      "tested": false,
+      "test_command": "",
+      "test_status": "",
+      "tested_at": null
+    },
+    "changes:0": {
+      "reviewed": true,
+      "reviewed_by": "lwy",
+      "reviewed_at": "2026-11-11T12:58:34.413026+00:00",
+      "tested": false,
+      "test_command": "",
+      "test_status": "",
+      "tested_at": null
+    },
+    "changes:1": {
+      "reviewed": true,
+      "reviewed_by": "lwy",
+      "reviewed_at": "2026-11-11T12:58:34.413038+00:00",
+      "tested": false,
+      "test_command": "",
+      "test_status": "",
+      "tested_at": null
+    },
+    "changes:2": {
+      "reviewed": true,
+      "reviewed_by": "lwy",
+      "reviewed_at": "2026-11-11T12:58:34.413051+00:00",
+      "tested": false,
+      "test_command": "",
+      "test_status": "",
+      "tested_at": null
+    },
+    "changes:3": {
+      "reviewed": true,
+      "reviewed_by": "lwy",
+      "reviewed_at": "2026-11-11T12:58:34.413064+00:00",
+      "tested": false,
+      "test_command": "",
+      "test_status": "",
+      "tested_at": null
+    },
+    "changes:4": {
+      "reviewed": true,
+      "reviewed_by": "lwy",
+      "reviewed_at": "2026-11-11T12:58:34.413076+00:00",
+      "tested": false,
+      "test_command": "",
+      "test_status": "",
+      "tested_at": null
+    },
+    "changes:5": {
+      "reviewed": true,
+      "reviewed_by": "lwy",
+      "reviewed_at": "2026-11-11T12:58:34.413089+00:00",
+      "tested": false,
+      "test_command": "",
+      "test_status": "",
+      "tested_at": null
+    }
+  },
+  "comments": {},
+  "stage_reviews": {
+    "doc": {
+      "by": "human:lwy",
+      "at": "2026-11-11T12:58:34.581926+00:00",
+      "note": ""
+    },
+    "test": {
+      "by": "human:lwy",
+      "at": "2026-11-11T12:58:34.666304+00:00",
+      "note": ""
+    },
+    "feat": {
+      "by": "human:lwy",
+      "at": "2026-11-11T12:58:34.753566+00:00",
+      "note": ""
+    },
+    "fix": {
+      "by": "human:lwy",
+      "at": "2026-11-11T12:58:34.838865+00:00",
+      "note": ""
+    },
+    "close": {
+      "by": "human:lwy",
+      "at": "2026-11-11T12:58:34.922841+00:00",
+      "note": ""
+    }
+  },
+  "created_at": "2026-11-11T12:49:00.110292+00:00",
+  "updated_at": "2026-11-11T12:58:34.922850+00:00"
+}

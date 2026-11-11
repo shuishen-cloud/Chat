@@ -1,0 +1,39 @@
+{
+  "commit": "0541122a",
+  "notes": [
+    {
+      "commit": "0541122a",
+      "kind": "difficulty",
+      "title": "画板连线从单端改为四向手柄，需持久化 handle id",
+      "detail": "原先节点只有 top(target)/bottom(source) 两个连接点，无法左右汇聚。改为四向各一组 source+target，并用 s-top/s-right/... 作为 handle id。难点是 handle id 必须连同边一起持久化（BoardEdge.sourceHandle/targetHandle），否则节点位置变化后连线会重算到错误的一侧。渲染时对旧数据回退到 s-bottom/t-top，保证历史画板不炸。",
+      "author": "human:unknown",
+      "files": [
+        "src/components/board-canvas.tsx"
+      ],
+      "severity": "high",
+      "status": "noted",
+      "catches": [],
+      "verifications": [
+        {
+          "kind": "test",
+          "target": "scripts/test-board.cjs",
+          "command": "",
+          "method": "CASE=flowEdgeDefaults node scripts/test-board.cjs",
+          "script": "",
+          "expected": "passed",
+          "note": "",
+          "cwd": "",
+          "last_run_at": null,
+          "last_status": "unknown",
+          "last_output": ""
+        }
+      ],
+      "issue_id": null,
+      "resolves": [],
+      "tags": [
+        "board-flow-tasks"
+      ],
+      "created_at": "2026-11-11T12:32:44.794262+00:00"
+    }
+  ]
+}

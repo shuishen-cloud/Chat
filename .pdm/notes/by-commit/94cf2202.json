@@ -1,0 +1,39 @@
+{
+  "commit": "94cf2202",
+  "notes": [
+    {
+      "commit": "94cf2202",
+      "kind": "pitfall",
+      "title": "React Flow 手柄默认 pointer-events: none",
+      "detail": "react-flow__handle 默认 pointer-events:none，只有 connectingfrom 等状态下才放开。给手柄加 ::after 扩命中区时必须同时显式 pointer-events: all，否则扩出来的区域收不到 pointerdown，「手柄容易点了」这个改进会静默失效。",
+      "author": "human:unknown",
+      "files": [
+        "src/index.css"
+      ],
+      "severity": "medium",
+      "status": "noted",
+      "catches": [],
+      "verifications": [
+        {
+          "kind": "test",
+          "target": "scripts/test-board.cjs",
+          "command": "",
+          "method": "CASE=connectFromEdges node scripts/test-board.cjs",
+          "script": "",
+          "expected": "passed",
+          "note": "",
+          "cwd": "",
+          "last_run_at": null,
+          "last_status": "unknown",
+          "last_output": ""
+        }
+      ],
+      "issue_id": null,
+      "resolves": [],
+      "tags": [
+        "board-note-md-and-ux"
+      ],
+      "created_at": "2026-11-11T13:28:46.287887+00:00"
+    }
+  ]
+}

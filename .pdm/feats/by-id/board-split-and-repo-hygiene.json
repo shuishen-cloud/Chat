@@ -1,0 +1,41 @@
+{
+  "slug": "board-split-and-repo-hygiene",
+  "title": "画板组件拆分、首屏按需加载与仓库删减字体源码包",
+  "kind": "refactor",
+  "status": "draft",
+  "doc": "doc/feat/board-split-and-repo-hygiene.md",
+  "api": [],
+  "logs": [],
+  "fallbacks": [],
+  "design_note": "只拆完全自包含的组件；NodeHandles 依赖画布内部常量故保留。画板已是条件渲染，可安全 lazy。字体上游 zip 与运行无关且被 public 原样拷贝进 dist，必须删",
+  "impl_note": "EdgeEditor/NodeHueButton/HistoryList 迁到 components/board/；App.tsx 用 lazy+Suspense 包 BoardPanel；删 zip 并加 gitignore；补字体许可说明",
+  "data_model": [
+    "无新增数据结构，仅移动组件与资源文件"
+  ],
+  "samples": [
+    "{\"chunks\":{\"index\":\"772KB\",\"board-panel\":\"213KB\"}}"
+  ],
+  "changes": [
+    "src/components/board-canvas.tsx::EdgeEditor —— 迁出到 board/edge-editor.tsx",
+    "src/App.tsx::App —— BoardPanel 改为 lazy 加载"
+  ],
+  "test_note": "Playwright 画板 42 用例全量回归；npm run build 核对 chunk 拆分与 dist 体积",
+  "debug_note": "",
+  "extend_note": "",
+  "impact": "对外行为不变；画板首次打开多一次 chunk 加载",
+  "importance": "medium",
+  "commits": [
+    "53472b7ee877f6432ca88e31f413480845bc0231",
+    "86540ecbfbe3a44733f744378b1f99bc5e7250e6",
+    "7bb9cc641e76b56e71ba99be26d715869e556a69",
+    "04da04cadf01d68fa7d29fadb60d399a56feb37a"
+  ],
+  "notes": [],
+  "discovered": [],
+  "stage": "fix",
+  "reviews": {},
+  "comments": {},
+  "stage_reviews": {},
+  "created_at": "2026-11-11T13:58:56.345094+00:00",
+  "updated_at": "2026-11-11T14:00:27.810011+00:00"
+}
