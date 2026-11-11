@@ -9,8 +9,12 @@ npm run dev
 # 跑全部用例（约 12s）
 node scripts/test-quick-ask.cjs
 
+# 画板用例（约 11s）
+node scripts/test-board.cjs
+
 # 只跑某个用例
 CASE=freshSendCase node scripts/test-quick-ask.cjs
+CASE=addFromMessage node scripts/test-board.cjs
 
 # 列出所有用例名
 CASE=--list node scripts/test-quick-ask.cjs
@@ -27,6 +31,35 @@ CASE=--list node scripts/test-quick-ask.cjs
 | `CASE=xxx` 单跑 | 调试时只跑一个用例 |
 
 从 34s 优化到 14s（约 2.4 倍），且消除了用例间的偶发失败。
+
+## 画板用例覆盖
+
+| 用例 | 验证点 |
+|---|---|
+| `addFromMessage` | 消息动作条加入画板，节点引用源消息并渲染 |
+| `dedupe` | 重复加入不产生重复节点 |
+| `wholeConversation` | 整条对话铺入，自动生成 reference 边 |
+| `editNote` | 便签编辑写回 store |
+| `dragPersistsPosition` | 拖拽在 dragStop 时提交坐标 |
+| `gcOnConversationDelete` | 删除对话后悬空引用被 gc |
+| `autoCreateBoard` | 无画板时自动建板 |
+| `switchBoard` | 切换画板（空板显示空态、切回恢复卡片） |
+| `dragFollowsPointerMidway` | 拖拽**中途**卡片已跟随，而非松手才跳 |
+| `resizePersists` | 选中出缩放手柄、尺寸落库 |
+| `jumpBackToMessage` | 回原消息：切回对话视图 + 高亮定位 |
+| `edgesAreCurves` | 连线为贝塞尔曲线（路径含 C 命令） |
+| `switchConversationWithBoardOpen` | 画板打开时仍可切换会话 |
+| `checkboxBatchAdd` | 多选消息批量加入指定画板 |
+| `flowEdgeDefaults` | 拖拽新建的线默认是 flow 且启用 |
+| `editEdgePrompt` | 编辑边上的提示词并持久化 |
+| `toggleEdgeEnabled` | 禁用某条线 |
+| `taskCreateAndSelectEdges` | 创建任务并点线加入 |
+| `runTaskWritesHistory` | 执行任务写回节点内容与历史 |
+| `editNodeContent` | 直接改写节点内容 |
+| `restoreNodeContent` | 还原为原文 |
+| `multiEdgeConvergeKeepsAll` | 多线汇聚同一节点时结果拼接保留 |
+| `selectionSerializesStructure` | 选区还原 Markdown：表格/代码块/列表结构正确 |
+| `selectionAddToBoard` | 划词加入**指定**画板，片段保留结构 |
 
 > 曾尝试用例间只 reload 复用同一 context（11s），但出现偶发状态泄漏，
 > 故改为每用例独立 context，用 4s 换取确定性。
