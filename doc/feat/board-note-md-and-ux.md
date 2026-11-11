@@ -78,4 +78,40 @@ Markdown 源码与渲染结果之间需要来回转换，contentEditable 很难�
 
 ## 实现与校验结果
 
-（收尾阶段补充）
+### 落地情况
+
+| 设计点 | 实现位置 |
+|---|---|
+| 便签 Markdown 渲染 / 编辑双模式 | `board-canvas.tsx::NoteNode` |
+| 执行中边动画 | `index.css` `.board-edge-executing` + `InnerFlow` 的 `runningEdgeIds` |
+| Loose 连接 + 手柄热区放大 | `ReactFlow connectionMode` + `.board-handle::after` |
+| 画板宽度拖拽 + 最大化 | `App.tsx`（`data-board-resizer`）与 `BoardPanel` 的最大化按钮 |
+
+### 与设计的偏差（重要）
+
+**放弃了"节点任意边沿都能起线"的做法。**
+原设计打算沿四条边铺透明热区手柄，实现后发现：热区一旦放开 `pointer-events`，
+就会把节点的点击与拖动一起抢走，导致 `dragPersistsPosition`、
+`dragFollowsPointerMidway` 等用例直接失败。
+
+最终方案改为：**保留四向手柄，用 CSS `::after` 把命中区从 7px 扩到约 26px**，
+配合 `connectionMode: Loose`（不要求 source→target 方向匹配）。
+这样既不用精确对准小圆点，也不影响节点拖动。
+
+对应地，用例 `connectFromEdges` 的断言从「从边沿起线」改为
+「偏离手柄中心约 8px 仍能起线」，如实反映实现能力。
+
+### 校验
+
+- `scripts/test-board.cjs`：42 个用例全部通过，本 feat 新增 5 个：
+  `noteRendersMarkdown`、`noteEditMode`、`edgeExecutingAnimation`、
+  `connectFromEdges`、`boardWidthResize`、`boardMaximize`
+- `scripts/test-quick-ask.cjs`：11 个通过（无回归）
+- `npm run build`、`npx tsc -b` 通过，新增代码 lint 0 告警
+
+### 已知限制
+
+1. 拉线仍需从节点四边的手柄附近开始（命中区 26px），不是整条边。
+   若将来要做"任意位置起线"，需要自定义 `onPointerDown` 判断而非依赖 Handle。
+2. 画板宽度上限 900px 且不超过窗口 70%，避免对话区被挤没。
+3. 执行动画只覆盖正在执行的边；当前串行执行，故同时最多一条。
