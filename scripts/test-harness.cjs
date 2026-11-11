@@ -175,6 +175,28 @@ async function createHarness(browser, context) {
       await page.unroute("**/chat/completions").catch(() => {})
     },
 
+    /**
+     * 拦截请求并记录请求体，供断言「发给模型的历史对不对」。
+     * 返回的数组会随着请求累积。
+     */
+    async recordRequests(replyText = "收到") {
+      await page.unroute("**/chat/completions").catch(() => {})
+      const bodies = []
+      await page.route("**/chat/completions", async (route) => {
+        try {
+          bodies.push(JSON.parse(route.request().postData() || "{}"))
+        } catch {
+          bodies.push({})
+        }
+        await route.fulfill({
+          status: 200,
+          headers: { "content-type": "text/event-stream" },
+          body: sse(replyText),
+        })
+      })
+      return bodies
+    },
+
     /** 在指定消息内选中文字（DOM Range，避免坐标猜测） */
     async selectIn(messageId, chars = 160) {
       const ok = await page.evaluate(
@@ -211,6 +233,19 @@ async function createHarness(browser, context) {
 
     async click(name, scope = "body") {
       await page.locator(scope).getByRole("button", { name }).first().click()
+    },
+
+    /**
+     * 打开画板视图（侧边栏入口）。
+     * 侧边栏和画板内部都有「画板」相关文案，因此限定在 aside 内点击。
+     */
+    async openBoard() {
+      await page
+        .locator("aside")
+        .getByRole("button", { name: "画板", exact: true })
+        .first()
+        .click()
+      await page.locator("main").last().waitFor({ state: "visible" })
     },
 
     count(selector, scope = "body") {

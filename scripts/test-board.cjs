@@ -522,6 +522,23 @@ cases.selectionSerializesStructure = async (t) => {
 
   // 普通段落不受影响
   t.eq(out.p, "普通一行话。", "普通段落原样保留")
+
+  /*
+   * 回归：整条消息全选时不能把代码块「复制」按钮的文案当成正文。
+   * 曾经的 bug：全选时顶层块是代码块的 wrapper div，直接走 serializeBlock，
+   * 而那条路径不检查 data-ui-chrome，按钮文字被当成行内文本输出。
+   */
+  const whole = await t.page.evaluate(async () => {
+    const mod = await import("/src/lib/selection-to-markdown.ts")
+    const holder = document.querySelector("[data-message-id='m1']")
+    const r = document.createRange()
+    r.selectNodeContents(holder)
+    return mod.rangeToMarkdown(r)
+  })
+  t.ok(!whole.includes("复制"), "全选不包含按钮文案")
+  t.ok(!whole.includes("已复制"), "全选不包含按钮文案")
+  // wrapper div 里嵌的 pre 必须序列化成围栏代码块，而不是行内反引号
+  t.ok(whole.includes("```"), "全选时代码块仍为围栏形式")
 }
 
 /** 划词 → 加入指定画板 */
@@ -606,7 +623,7 @@ function seedFlow() {
 
 /** 拖拽新建的连线默认是 flow 且启用 */
 cases.flowEdgeDefaults = async (t) => {
-  const now = Date.now()
+  // 这个用例不需要时间基准，去掉未使用变量
   await t.seed({
     ...seedFlow(),
     boardEdges: [],
@@ -813,7 +830,7 @@ cases.multiEdgeConvergeKeepsAll = async (t) => {
 
 /** 节点、连线、会话都能标色并持久化 */
 cases.colorMarks = async (t) => {
-  const now = Date.now()
+  // 这个用例不需要时间基准，去掉未使用变量
   await t.seed({
     ...seedFlow(),
     conversations: [
