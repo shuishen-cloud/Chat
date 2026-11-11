@@ -198,11 +198,17 @@ export function withBoardGc(state: ChatState): ChatState {
   return { ...state, boardNodes, boardEdges, boardTasks }
 }
 
-export function saveState(state: ChatState) {
+export function saveState(state: ChatState): boolean {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
-  } catch {
-    // 配额溢出等情况静默失败，不阻塞 UI
+    return true
+  } catch (err) {
+    /*
+     * 配额溢出等情况不能完全静默：用户会以为数据已经保存，
+     * 刷新后才发现丢失。这里返回 false，由调用方提示。
+     */
+    console.error("[shadcn-chat] 保存失败，本地存储可能已满", err)
+    return false
   }
 }
 

@@ -480,6 +480,51 @@ const cases = {
     t.eq(conv.messages.length, 4, "两条问答都写入当前对话")
     t.ok(conv.title !== "新对话", "标题已按首条消息更新")
   },
+
+  /**
+   * 回归：重新生成时不能把最后一条提问发两遍。
+   *
+   * 曾经的 bug：regenerate 先 setState 截断消息，再 await send()，
+   * 而 send 用的是本轮 render 捕获的 state 闭包（截断**前**），
+   * 导致上下文里旧问旧答都在、新提问又追加一次。
+   */
+  async regenerateContextCase(t) {
+    const bodies = await t.recordRequests("新答案")
+    await t.seed({
+      projects: [{ id: "p1", name: "P", createdAt: 1 }],
+      conversations: [
+        {
+          id: "c1", projectId: "p1", title: "t", createdAt: 1, updatedAt: 4,
+          messages: [
+            { id: "m1", role: "user", content: "第一问", createdAt: 1 },
+            { id: "m2", role: "assistant", content: "第一答", createdAt: 2 },
+            { id: "m3", role: "user", content: "第二问", createdAt: 3 },
+            { id: "m4", role: "assistant", content: "第二答", createdAt: 4 },
+          ],
+        },
+      ],
+      favorites: [], tags: [], activeProjectId: "p1",
+      activeConversationId: "c1", apiKey: "sk-t",
+      baseUrl: "https://api.deepseek.com", model: "deepseek-v4-pro",
+      sidebarView: "list",
+    })
+
+    await t.click("重新生成")
+    await t.stateUntil(
+      (s) => s.conversations[0].messages.some((m) => m.content === "新答案"),
+      3000,
+      "新回复已写入"
+    )
+
+    t.eq(bodies.length, 1, "只发了一次请求")
+    const sent = bodies[0].messages
+    const users = sent.filter((m) => m.role === "user").map((m) => m.content)
+    t.eq(users.join("|"), "第一问|第二问", "提问不重复")
+    t.ok(
+      !sent.some((m) => m.content === "第二答"),
+      "旧回答已从上下文移除"
+    )
+  },
 }
 
 const only = process.env.CASE
