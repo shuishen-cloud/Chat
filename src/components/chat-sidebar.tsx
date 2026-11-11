@@ -55,8 +55,8 @@ import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import type { ChatStore } from "@/hooks/use-chat-store"
-import type { Conversation, Project } from "@/lib/types"
+import type { BranchNode, ChatStore } from "@/hooks/use-chat-store"
+import type { Conversation } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
 interface Props {
@@ -90,7 +90,7 @@ export function ChatSidebar({ store, onOpenSettings, onOpenFavorites }: Props) {
     duplicateConversation,
     state,
     setSidebarView,
-    projects: allProjects,
+    conversationTree,
   } = store
 
   const [newProjectOpen, setNewProjectOpen] = useState(false)
@@ -113,25 +113,24 @@ export function ChatSidebar({ store, onOpenSettings, onOpenFavorites }: Props) {
     )
   }, [visibleConversations, query])
 
-  /** 树视图：按项目分组的全部对话（含搜索过滤） */
-  const treeGroups = useMemo(() => {
+  /** 搜索时过滤分支树，保留命中节点的祖先链 */
+  const filteredTree = useMemo(() => {
     const q = query.trim().toLowerCase()
-    return allProjects.map((proj) => {
-      const convs = store.state.conversations
-        .filter((c) => c.projectId === proj.id && !c.archived)
-        .sort((a, b) => {
-          if (!!a.pinned !== !!b.pinned) return a.pinned ? -1 : 1
-          return b.updatedAt - a.updatedAt
-        })
-        .filter((c) =>
-          !q
-            ? true
-            : c.title.toLowerCase().includes(q) ||
-              c.messages.some((m) => m.content.toLowerCase().includes(q))
-        )
-      return { project: proj, conversations: convs }
-    })
-  }, [allProjects, store.state.conversations, query])
+    if (!q) return conversationTree
+
+    const matches = (c: Conversation) =>
+      c.title.toLowerCase().includes(q) ||
+      c.messages.some((m) => m.content.toLowerCase().includes(q))
+
+    const prune = (nodes: typeof conversationTree): typeof conversationTree =>
+      nodes.flatMap((n) => {
+        const kids = prune(n.children)
+        if (!matches(n.conversation) && kids.length === 0) return []
+        return [{ ...n, children: kids }]
+      })
+
+    return prune(conversationTree)
+  }, [conversationTree, query])
 
   const pinnedList = filtered.filter((c) => c.pinned)
   const normalList = filtered.filter((c) => !c.pinned)
@@ -407,9 +406,9 @@ export function ChatSidebar({ store, onOpenSettings, onOpenFavorites }: Props) {
           <Separator className="my-1.5" />
 
           {view === "tree" ? (
-            <TreeView
-              groups={treeGroups}
-              activeProjectId={activeProject?.id ?? null}
+            <BranchTree
+              nodes={filteredTree}
+              activeConversationId={activeConversation?.id ?? null}
               collapsed={collapsedProjects}
               onToggleCollapse={(id) =>
                 setCollapsedProjects((prev) => {
@@ -419,7 +418,6 @@ export function ChatSidebar({ store, onOpenSettings, onOpenFavorites }: Props) {
                   return next
                 })
               }
-              onSelectProject={selectProject}
               renderConversation={renderConversation}
             />
           ) : (
@@ -584,25 +582,21 @@ export function ChatSidebar({ store, onOpenSettings, onOpenFavorites }: Props) {
 
 /* ------------------------------------------------------------------ */
 
-/** 树状视图：项目为父节点、对话为子节点，可折叠 */
-function TreeView({
-  groups,
-  activeProjectId,
+/** 分支树：展示当前项目下对话之间的分支关系 */
+function BranchTree({
+  nodes,
+  activeConversationId,
   collapsed,
   onToggleCollapse,
-  onSelectProject,
   renderConversation,
 }: {
-  groups: Array<{ project: Project; conversations: Conversation[] }>
-  activeProjectId: string | null
+  nodes: BranchNode[]
+  activeConversationId: string | null
   collapsed: Set<string>
   onToggleCollapse: (id: string) => void
-  onSelectProject: (id: string) => void
   renderConversation: (c: Conversation, archived?: boolean) => React.ReactNode
 }) {
-  const visibleGroups = groups.filter((g) => g.conversations.length > 0)
-
-  if (visibleGroups.length === 0) {
+  if (nodes.length === 0) {
     return (
       <div className="px-2 py-6 text-center text-xs text-muted-foreground">
         没有匹配的对话
@@ -611,66 +605,108 @@ function TreeView({
   }
 
   return (
-    <div className="flex flex-col gap-1">
-      {visibleGroups.map(({ project, conversations }) => {
-        const isCollapsed = collapsed.has(project.id)
-        const isActiveProject = project.id === activeProjectId
-        return (
-          <div key={project.id}>
-            <div
-              className={cn(
-                "group/proj flex items-center gap-1 rounded-md pr-1 transition-colors",
-                isActiveProject ? "bg-sidebar-accent/60" : "hover:bg-sidebar-accent/40"
-              )}
-            >
-              <button
-                type="button"
-                onClick={() => onToggleCollapse(project.id)}
-                className="flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground"
-                aria-label={isCollapsed ? "展开" : "折叠"}
-              >
-                <ChevronRight
-                  className={cn(
-                    "size-3 transition-transform",
-                    !isCollapsed && "rotate-90"
-                  )}
-                />
-              </button>
-              <button
-                type="button"
-                onClick={() => onSelectProject(project.id)}
-                className="flex min-w-0 flex-1 items-center gap-1.5 py-1.5 text-left"
-              >
-                <FolderClosed
-                  className={cn(
-                    "size-3.5 shrink-0",
-                    isActiveProject ? "text-foreground" : "text-muted-foreground"
-                  )}
-                />
-                <span
-                  className={cn(
-                    "truncate text-xs font-medium",
-                    isActiveProject ? "text-foreground" : "text-muted-foreground"
-                  )}
-                >
-                  {project.name}
-                </span>
-                <span className="shrink-0 text-[10px] text-muted-foreground/60 tabular-nums">
-                  {conversations.length}
-                </span>
-              </button>
-            </div>
-
-            {!isCollapsed && (
-              <div className="ml-3 flex flex-col gap-0.5 border-l border-border pl-1.5">
-                {conversations.map((c) => renderConversation(c))}
-              </div>
-            )}
-          </div>
-        )
-      })}
+    <div className="flex flex-col gap-0.5">
+      {nodes.map((n) => (
+        <BranchTreeNode
+          key={n.conversation.id}
+          node={n}
+          activeConversationId={activeConversationId}
+          collapsed={collapsed}
+          onToggleCollapse={onToggleCollapse}
+          renderConversation={renderConversation}
+        />
+      ))}
     </div>
   )
+}
+
+function BranchTreeNode({
+  node,
+  activeConversationId,
+  collapsed,
+  onToggleCollapse,
+  renderConversation,
+}: {
+  node: BranchNode
+  activeConversationId: string | null
+  collapsed: Set<string>
+  onToggleCollapse: (id: string) => void
+  renderConversation: (c: Conversation, archived?: boolean) => React.ReactNode
+}) {
+  const { conversation, children, depth } = node
+  const hasChildren = children.length > 0
+  const isCollapsed = collapsed.has(conversation.id)
+  const isActive = conversation.id === activeConversationId
+  // 高亮当前对话的祖先链
+  const inActivePath = containsId(node, activeConversationId)
+
+  return (
+    <div>
+      <div className="flex items-stretch">
+        {/* 层级缩进 */}
+        {Array.from({ length: depth }).map((_, i) => (
+          <span key={i} className="w-3 shrink-0" aria-hidden />
+        ))}
+
+        {/* 折叠箭头 / 占位 */}
+        {hasChildren ? (
+          <button
+            type="button"
+            onClick={() => onToggleCollapse(conversation.id)}
+            className="flex w-4 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground"
+            aria-label={isCollapsed ? "展开分支" : "折叠分支"}
+          >
+            <ChevronRight
+              className={cn("size-3 transition-transform", !isCollapsed && "rotate-90")}
+            />
+          </button>
+        ) : (
+          <span className="w-4 shrink-0" aria-hidden />
+        )}
+
+        <div
+          className={cn(
+            "min-w-0 flex-1 rounded-md transition-colors",
+            isActive
+              ? "bg-sidebar-accent text-sidebar-accent-foreground"
+              : inActivePath
+                ? "bg-sidebar-accent/30"
+                : "hover:bg-sidebar-accent/60"
+          )}
+        >
+          {renderConversation(conversation)}
+        </div>
+      </div>
+
+      {hasChildren && !isCollapsed && (
+        <div className="relative">
+          {/* 竖线 */}
+          <span
+            className="absolute top-0 bottom-0 border-l border-border"
+            style={{ left: `${(depth + 1) * 12 + 8}px` }}
+            aria-hidden
+          />
+          {children.map((child) => (
+            <BranchTreeNode
+              key={child.conversation.id}
+              node={child}
+              activeConversationId={activeConversationId}
+              collapsed={collapsed}
+              onToggleCollapse={onToggleCollapse}
+              renderConversation={renderConversation}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** 节点子树中是否包含指定对话 */
+function containsId(node: BranchNode, id: string | null): boolean {
+  if (!id) return false
+  if (node.conversation.id === id) return true
+  return node.children.some((c) => containsId(c, id))
 }
 
 function SectionLabel({ children }: { children: React.ReactNode }) {

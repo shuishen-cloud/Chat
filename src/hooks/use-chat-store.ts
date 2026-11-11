@@ -17,6 +17,14 @@ import {
   type Tag,
 } from "@/lib/types"
 
+/** 分支树节点：一个对话及其分支后代 */
+export interface BranchNode {
+  conversation: Conversation
+  children: BranchNode[]
+  /** 树深度，0 为根对话 */
+  depth: number
+}
+
 /** 收藏项 + 解析后的关联对象 */
 export interface FavoriteEntry {
   favorite: Favorite
@@ -101,6 +109,47 @@ export function useChatStore() {
     }
     return out.sort((a, b) => b.favorite.createdAt - a.favorite.createdAt)
   }, [state.favorites, state.conversations, state.projects, state.tags])
+
+  /**
+   * 当前项目下的对话按分支关系组织成树。
+   * 根节点 = 没有 branchedFrom，或父对话已不存在的对话。
+   */
+  const conversationTree = useMemo((): BranchNode[] => {
+    const inProject = state.conversations.filter(
+      (c) => c.projectId === state.activeProjectId
+    )
+    const byId = new Map(inProject.map((c) => [c.id, c]))
+    const childrenOf = new Map<string, Conversation[]>()
+
+    const roots: Conversation[] = []
+    for (const c of inProject) {
+      const parentId = c.branchedFrom?.conversationId
+      // 父对话不在当前项目（被移动/删除）时，此对话升级为根
+      if (parentId && byId.has(parentId) && parentId !== c.id) {
+        const arr = childrenOf.get(parentId) ?? []
+        arr.push(c)
+        childrenOf.set(parentId, arr)
+      } else {
+        roots.push(c)
+      }
+    }
+
+    const sortSiblings = (list: Conversation[]) =>
+      [...list].sort((a, b) => {
+        if (!!a.pinned !== !!b.pinned) return a.pinned ? -1 : 1
+        return b.updatedAt - a.updatedAt
+      })
+
+    const build = (conv: Conversation, depth: number): BranchNode => ({
+      conversation: conv,
+      depth,
+      children: sortSiblings(childrenOf.get(conv.id) ?? []).map((child) =>
+        build(child, depth + 1)
+      ),
+    })
+
+    return sortSiblings(roots).map((r) => build(r, 0))
+  }, [state.conversations, state.activeProjectId])
 
   /** 某条消息是否已被收藏 */
   const favoriteOf = useCallback(
@@ -714,6 +763,7 @@ export function useChatStore() {
     archivedConversations,
     favorites,
     tags: state.tags,
+    conversationTree,
     favoriteOf,
     activeConversation,
     streamingConvId,
