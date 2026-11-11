@@ -1390,5 +1390,28 @@ cases.boardMaximize = async (t) => {
   t.ok(after > before, `点击后变宽 (${Math.round(before)} -> ${Math.round(after)})`)
 }
 
+/**
+ * 画板拆成独立 chunk 后，首次打开仍能正常渲染。
+ *
+ * BoardPanel 现在是 React.lazy，Suspense 期间会短暂显示占位文字；
+ * 这里验证占位确实会被真实画布替掉，避免拆分后掉入永久 loading。
+ */
+cases.boardLazyLoads = async (t) => {
+  await t.seed(seedFlow())
+
+  // 画板已在 mainView=board 时不显示占位，直接出画布
+  await t.untilVisible(".react-flow")
+  t.ok(true, "懒加载后画布正常渲染")
+
+  // 占位文案不应残留
+  const placeholder = await t.page.getByText("正在加载画板…").count()
+  t.eq(placeholder, 0, "加载完成后不残留占位文案")
+
+  // 拆分出去的组件仍可用：连线编辑器
+  await t.page.locator(".react-flow__edge-path").first().click({ force: true })
+  await t.page.getByPlaceholder("这条线要做什么？").waitFor({ state: "visible" })
+  t.ok(true, "拆出的 EdgeEditor 仍可打开")
+}
+
 runAll(cases)
 console.log("URL:", URL)
