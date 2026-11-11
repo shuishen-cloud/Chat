@@ -37,6 +37,7 @@
 - **对话操作**：停止生成、重新生成、复制、导出 Markdown
 - **思考开关**：可在设置里关闭思维链展示（不改变服务端行为，详见设置面板说明）
 - **界面**：亮/暗主题、侧边栏折叠、智能贴底滚动、代码块一键复制
+- **自托管字体**：正文用霞鹜文楷、代码用 Fira Code，均放在 `public/fonts/`，不依赖外部 CDN
 - **本地持久化**：状态存 `localStorage`，无需后端
 
 ## 技术栈
@@ -87,21 +88,31 @@ npm run lint     # oxlint
 ```
 src/
 ├── components/
-│   ├── ui/                 # shadcn 生成的基础组件（勿手改）
-│   ├── chat-sidebar.tsx    # 项目 + 会话列表
-│   ├── chat-main.tsx       # 消息区 + 输入框
-│   ├── board-panel.tsx     # 画板主视图（工具条 + 空状态）
-│   ├── board-canvas.tsx    # 画布封装 + 消息/便签自定义节点
-│   ├── settings-dialog.tsx # API Key / 模型 / Base URL
-│   └── markdown.tsx        # Markdown 渲染 + 代码块
+│   ├── ui/                    # shadcn 生成的基础组件（勿手改）
+│   ├── chat-sidebar.tsx       # 项目 + 会话列表
+│   ├── chat-main.tsx          # 消息区 + 输入框 + 多选加入画板
+│   ├── markdown.tsx           # Markdown 渲染 + 代码块复制
+│   ├── quick-ask-layer.tsx    # 划词浮层的挂载与状态管理
+│   ├── selection-quick-ask.tsx # 划词浮窗本体（追问/收藏/进画板）
+│   ├── board-panel.tsx        # 画板主视图（工具条 + 空状态）
+│   ├── board-canvas.tsx       # 画布封装 + 消息/便签自定义节点
+│   ├── favorites-panel.tsx    # 跨项目收藏汇总面板
+│   ├── prompt-history.tsx     # 右侧提示词历史
+│   ├── hue-picker.tsx         # 8 色标记选择器
+│   ├── settings-dialog.tsx    # API Key / 模型 / Base URL
+│   └── error-boundary.tsx     # 面板级错误隔离
 ├── hooks/
-│   ├── use-chat-store.ts   # 全部业务状态与动作
-│   └── use-scroll.ts       # 贴底滚动 / 输入框自增高
+│   ├── use-chat-store.ts      # 全部业务状态与动作
+│   ├── use-scroll.ts          # 贴底滚动 / 输入框自增高 / 选区监听
+│   └── use-is-dark.ts         # 当前是否暗色主题
 ├── lib/
-│   ├── types.ts            # 领域类型与常量
-│   ├── storage.ts          # localStorage 读写与画板引用清理
-│   └── deepseek.ts         # DeepSeek 流式客户端
-└── App.tsx                 # 应用外壳
+│   ├── types.ts               # 领域类型与常量
+│   ├── storage.ts             # localStorage 读写与画板引用清理
+│   ├── deepseek.ts            # DeepSeek 流式客户端
+│   ├── selection-to-markdown.ts # 划词选区 → Markdown 序列化
+│   ├── hue.ts                 # 色相派生配色（明暗双主题）
+│   └── utils.ts               # cn() 样式合并
+└── App.tsx                    # 应用外壳（画板按需懒加载）
 ```
 
 ## 说明

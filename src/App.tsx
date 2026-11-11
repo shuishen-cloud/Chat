@@ -1,10 +1,17 @@
-import { useEffect, useState } from "react"
+import { Suspense, lazy, useEffect, useState } from "react"
 import { Moon, PanelLeft, Sun } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { TooltipProvider, Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { ChatSidebar } from "@/components/chat-sidebar"
 import { ChatMain } from "@/components/chat-main"
-import { BoardPanel } from "@/components/board-panel"
+
+/**
+ * 画板依赖 @xyflow/react（数百 KB），而它不是首屏必需的。
+ * 拆成独立 chunk，只在用户真正打开画板时才加载。
+ */
+const BoardPanel = lazy(() =>
+  import("@/components/board-panel").then((m) => ({ default: m.BoardPanel }))
+)
 import { SettingsDialog } from "@/components/settings-dialog"
 import { FavoritesPanel } from "@/components/favorites-panel"
 import { ErrorBoundary } from "@/components/error-boundary"
@@ -180,16 +187,24 @@ export default function App() {
                   className="flex shrink-0 flex-col border-l border-border"
                 >
                   <ErrorBoundary label="画板" resetKey={store.state.activeBoardId}>
-                    <BoardPanel
-                      store={store}
-                      onClose={() => setBoardOpen(false)}
-                      maximized={boardWidth >= MAX_BOARD_WIDTH - 1}
-                      onToggleMaximize={() =>
-                        setBoardWidth((w) =>
-                          w >= MAX_BOARD_WIDTH - 1 ? DEFAULT_BOARD_WIDTH : MAX_BOARD_WIDTH
-                        )
+                    <Suspense
+                      fallback={
+                        <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
+                          正在加载画板…
+                        </div>
                       }
-                    />
+                    >
+                      <BoardPanel
+                        store={store}
+                        onClose={() => setBoardOpen(false)}
+                        maximized={boardWidth >= MAX_BOARD_WIDTH - 1}
+                        onToggleMaximize={() =>
+                          setBoardWidth((w) =>
+                            w >= MAX_BOARD_WIDTH - 1 ? DEFAULT_BOARD_WIDTH : MAX_BOARD_WIDTH
+                          )
+                        }
+                      />
+                    </Suspense>
                   </ErrorBoundary>
                 </div>
               </>

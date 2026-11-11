@@ -20,30 +20,26 @@ import {
 } from "@xyflow/react"
 import "@xyflow/react/dist/style.css"
 import {
-  AlertCircle,
-  ArrowDownToLine,
   Check,
   ChevronDown,
   ChevronUp,
-  Palette,
-  Play,
   ExternalLink,
   FileText,
   History,
   Pencil,
   RotateCcw,
   Trash2,
-  X,
-  Zap,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Markdown } from "@/components/markdown"
-import { HuePicker } from "@/components/hue-picker"
+import { EdgeEditor } from "@/components/board/edge-editor"
+import { NodeHueButton } from "@/components/board/node-hue-button"
+import { HistoryList } from "@/components/board/history-list"
 import { useIsDark } from "@/hooks/use-is-dark"
-import { hueBg, hueBorder, hueDot, hueStroke, hueText } from "@/lib/hue"
+import { hueBg, hueBorder, hueStroke, hueText } from "@/lib/hue"
 import type { BoardNodeEntry } from "@/hooks/use-chat-store"
-import type { BoardEdge, NodeRun } from "@/lib/types"
+import type { BoardEdge } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
 /** 节点四向连接点 */
@@ -127,6 +123,11 @@ export function BoardCanvas(props: BoardCanvasProps) {
 
   const dark = useIsDark()
 
+  /**
+   * 下发给自定义节点的回调集合。
+   * 集中成一个对象（而不是每个字段单独传）是因为 React Flow 的 nodeTypes
+   * 只在挂载时绑定一次，节点里拿不到外层最新的 props，只能通过 data 传递。
+   */
   const data = useMemo(
     () => ({
       onToggleExpand,
@@ -195,6 +196,7 @@ function InnerFlow({
   runningEdgeId,
 }: BoardCanvasProps & { nodes: Node<BoardNodeData>[] }) {
   const dark = useIsDark()
+  // 只定义一次；键名对应 BoardNodeData 里的 kind
   const nodeTypes = useMemo<NodeTypes>(
     () => ({ message: MessageNode, note: NoteNode }),
     []
@@ -238,6 +240,12 @@ function InnerFlow({
     )
   }, [nodes])
 
+  /**
+   * 只接受「选中/尺寸」类变更（如 Resize 手柄拖动）。
+   *
+   * 位置变更由下面的拖拽逻辑自己接管（先本地跟手、松手才写库），
+   * 增删则由 store 统一管理；放行它们会和 store 双向打架导致抖动。
+   */
   const handleNodesChange = useCallback(
     (changes: NodeChange<Node<BoardNodeData>>[]) => {
       const accepted = changes.filter(
@@ -308,6 +316,13 @@ function InnerFlow({
     [onSelectionChange]
   )
 
+  /**
+   * 领域边（BoardEdge）→ React Flow 边。
+   *
+   * 状态全部落在 className 上，由 CSS 控制样式：
+   * 执行中的流动动画、禁用淡化、选中高亮、批量选择时的可点态。
+   * 颜色直接用 inline style 覆盖，因为 hue 是运行时值，写不进 CSS 类。
+   */
   const flowEdges = useMemo<Edge[]>(
     () =>
       edges.map((e) => {
@@ -488,158 +503,6 @@ function InnerFlow({
           }}
         />
       )}
-    </div>
-  )
-}
-
-/* ------------------------------------------------------------------ */
-/* 连线编辑器：浮层，轻量不打断画布操作                                       */
-
-function EdgeEditor({
-  edge,
-  anchor,
-  running,
-  onClose,
-  onUpdate,
-  onToggleKind,
-  onToggleEnabled,
-  onSetHue,
-  onRun,
-  onDelete,
-}: {
-  edge: BoardEdge
-  /** 悬浮窗定位点（屏幕坐标），来自点击位置 */
-  anchor: { x: number; y: number }
-  running: boolean
-  onClose: () => void
-  onUpdate: (patch: Partial<Pick<BoardEdge, "prompt" | "promptHue">>) => void
-  onToggleKind: () => void
-  onToggleEnabled: () => void
-  onSetHue: (hue: number | undefined) => void
-  onRun: () => void
-  onDelete: () => void
-}) {
-  const [prompt, setPrompt] = useState(edge.prompt ?? "")
-  const runnable = edge.kind === "flow"
-
-  return (
-    // 不用全屏遮罩：点其他线/卡片时可以直接切换，不打断画布操作
-    <div
-      className="absolute z-20 w-[340px] rounded-xl border border-border bg-card p-3 shadow-xl"
-      style={{
-        left: Math.min(Math.max(anchor.x + 12, 8), Math.max(window.innerWidth - 360, 8)),
-        top: Math.min(Math.max(anchor.y - 24, 8), Math.max(window.innerHeight - 320, 8)),
-      }}
-      onClick={(e) => e.stopPropagation()}
-      onKeyDown={(e) => e.key === "Escape" && onClose()}
-    >
-        <div className="mb-2 flex items-center gap-2">
-          <Zap
-            className={cn(
-              "size-4",
-              runnable ? "text-primary" : "text-muted-foreground"
-            )}
-          />
-          <span className="flex-1 text-sm font-medium">
-            {runnable ? "可执行连线" : "仅联系"}
-          </span>
-          <Button variant="ghost" size="icon" className="size-6" onClick={onClose}>
-            <X className="size-3.5" />
-          </Button>
-        </div>
-
-        {runnable ? (
-          <>
-            <label className="mb-1 block text-[11px] text-muted-foreground">
-              这条线要做什么（会与起点材料一起发给模型）
-            </label>
-            <Textarea
-              autoFocus
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              placeholder="这条线要做什么？"
-              rows={4}
-              className="text-xs"
-            />
-          </>
-        ) : (
-          <p className="text-xs text-muted-foreground">
-            纯视觉联系，不参与任务执行。切换为「可执行」后可以填写提示词。
-          </p>
-        )}
-
-        <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-          <span className="w-14 shrink-0 text-[11px] text-muted-foreground">线条颜色</span>
-          <HuePicker value={edge.hue} onChange={onSetHue} />
-        </div>
-        {runnable && (
-          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-            <span className="w-14 shrink-0 text-[11px] text-muted-foreground">提示词色</span>
-            <HuePicker
-              value={edge.promptHue}
-              onChange={(h) => onUpdate({ promptHue: h })}
-            />
-          </div>
-        )}
-
-        <div className="mt-3 flex items-center gap-1.5">
-          <Button
-            size="sm"
-            className="h-7 px-2.5 text-xs"
-            onClick={() => {
-              onUpdate({ prompt })
-              onClose()
-            }}
-          >
-            <Check className="size-3" />
-            保存
-          </Button>
-          {runnable && edge.enabled !== false && (
-            <Button
-              variant="secondary"
-              size="sm"
-              className="h-7 gap-1 px-2 text-xs"
-              disabled={running}
-              onClick={() => {
-                // 先存下当前提示词，避免用户改了没保存就执行导致用的是旧值
-                onUpdate({ prompt })
-                onRun()
-              }}
-              title="立即执行这一条线（Ctrl/Cmd+Enter）"
-            >
-              <Play className="size-3" />
-              {running ? "执行中…" : "立即执行"}
-            </Button>
-          )}
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-7 px-2 text-xs"
-            onClick={onToggleKind}
-          >
-            {runnable ? "改为仅联系" : "改为可执行"}
-          </Button>
-          {runnable && (
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-7 px-2 text-xs"
-              onClick={onToggleEnabled}
-            >
-              {edge.enabled === false ? "启用此线" : "禁用此线"}
-            </Button>
-          )}
-          <div className="flex-1" />
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 px-2 text-xs text-destructive hover:text-destructive"
-            onClick={onDelete}
-          >
-            <Trash2 className="size-3" />
-            删除
-          </Button>
-        </div>
     </div>
   )
 }
@@ -1068,189 +931,4 @@ function ConnectingSurface() {
       className="board-handle board-handle-surface"
     />
   )
-}
-
-/* ------------------------------------------------------------------ */
-/* 节点颜色入口：小色点，点开即选                                            */
-
-function NodeHueButton({
-  hue,
-  onSet,
-}: {
-  hue?: number
-  onSet: (hue: number | undefined) => void
-}) {
-  const [open, setOpen] = useState(false)
-  return (
-    <div className="relative shrink-0">
-      <button
-        type="button"
-        title="标记颜色"
-        aria-label="标记颜色"
-        onClick={(e) => {
-          e.stopPropagation()
-          setOpen((v) => !v)
-        }}
-        className={cn(
-          "nodrag flex size-4 items-center justify-center rounded-full border transition-transform hover:scale-110",
-          hue === undefined ? "border-dashed border-muted-foreground/50" : "border-transparent"
-        )}
-        style={hue !== undefined ? { backgroundColor: hueDot(hue) } : undefined}
-      >
-        {hue === undefined && <Palette className="size-2.5 text-muted-foreground" />}
-      </button>
-      {open && (
-        <div className="nodrag absolute right-0 top-5 z-30 rounded-lg border border-border bg-card p-1.5 shadow-lg">
-          <HuePicker
-            value={hue}
-            onChange={(h) => {
-              onSet(h)
-              setOpen(false)
-            }}
-          />
-        </div>
-      )}
-    </div>
-  )
-}
-
-/* ------------------------------------------------------------------ */
-/* 运行历史：结构化卡片而非裸文本                                          */
-
-function HistoryList({
-  runs,
-  onApply,
-  onClose,
-}: {
-  runs: NodeRun[]
-  onApply: (runId: string) => void
-  onClose: () => void
-}) {
-  const [expanded, setExpanded] = useState<string | null>(null)
-
-  return (
-    <div
-      data-history
-      className="max-h-[260px] shrink-0 overflow-y-auto border-t border-current/10 bg-background/60 p-1.5 backdrop-blur-sm"
-    >
-      <div className="mb-1 flex items-center justify-between px-1">
-        <span className="text-[10px] font-medium text-muted-foreground">
-          运行历史 · {runs.length}
-        </span>
-        <Button variant="ghost" size="icon" className="size-4" onClick={onClose}>
-          <X className="size-2.5" />
-        </Button>
-      </div>
-
-      {runs.map((r) => {
-        const isOpen = expanded === r.id
-        const fail = !!r.error
-        return (
-          <div
-            key={r.id}
-            className={cn(
-              "mb-1 overflow-hidden rounded-lg border text-[10px]",
-              fail ? "border-destructive/40 bg-destructive/5" : "border-border/70 bg-card"
-            )}
-          >
-            <button
-              type="button"
-              className="flex w-full items-center gap-1 px-1.5 py-1 text-left transition-colors hover:bg-muted/50"
-              onClick={() => setExpanded(isOpen ? null : r.id)}
-            >
-              {fail ? (
-                <AlertCircle className="size-2.5 shrink-0 text-destructive" />
-              ) : (
-                <ArrowDownToLine className="size-2.5 shrink-0 text-muted-foreground" />
-              )}
-              <span className="shrink-0 tabular-nums text-muted-foreground">
-                {formatRunTime(r.createdAt)}
-              </span>
-              <span
-                className={cn(
-                  "min-w-0 flex-1 truncate font-medium",
-                  fail ? "text-destructive" : "text-foreground/80"
-                )}
-              >
-                {r.prompt || "无提示词"}
-              </span>
-              {!fail && (
-                <span
-                  role="button"
-                  tabIndex={0}
-                  className="shrink-0 rounded px-1 text-primary hover:underline"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    onApply(r.id)
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.stopPropagation()
-                      onApply(r.id)
-                    }
-                  }}
-                >
-                  回填
-                </span>
-              )}
-            </button>
-
-            {isOpen ? (
-              <div className="space-y-1.5 border-t border-border/60 px-1.5 py-1.5">
-                {r.inputs.map((inp, i) => (
-                  <div key={i}>
-                    <div className="mb-0.5 text-[9px] font-medium text-muted-foreground">
-                      输入 · {inp.title}
-                    </div>
-                    <div className="max-h-24 overflow-y-auto whitespace-pre-wrap break-words rounded bg-muted/50 p-1 leading-relaxed">
-                      {inp.text}
-                    </div>
-                  </div>
-                ))}
-                <div>
-                  <div className="mb-0.5 text-[9px] font-medium text-muted-foreground">
-                    {fail ? "错误" : "输出"}
-                  </div>
-                  <div
-                    className={cn(
-                      "max-h-32 overflow-y-auto whitespace-pre-wrap break-words rounded p-1 leading-relaxed",
-                      fail ? "bg-destructive/10 text-destructive" : "bg-muted/50"
-                    )}
-                  >
-                    {r.error ?? r.output}
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <div className="px-1.5 pb-1">
-                <div
-                  className={cn(
-                    "line-clamp-2 break-words leading-relaxed",
-                    fail ? "text-destructive/90" : "text-muted-foreground"
-                  )}
-                >
-                  {r.error ?? r.output}
-                </div>
-                <div className="mt-0.5 text-[9px] text-muted-foreground/70">
-                  输入 {r.inputs.length} 项 · 点击展开
-                </div>
-              </div>
-            )}
-          </div>
-        )
-      })}
-    </div>
-  )
-}
-
-/** 今天只显示时分秒，跨天补日期 */
-function formatRunTime(ts: number): string {
-  const d = new Date(ts)
-  const now = new Date()
-  const sameDay =
-    d.getFullYear() === now.getFullYear() &&
-    d.getMonth() === now.getMonth() &&
-    d.getDate() === now.getDate()
-  const hms = d.toLocaleTimeString()
-  return sameDay ? hms : `${d.getMonth() + 1}/${d.getDate()} ${hms.slice(0, 5)}`
 }

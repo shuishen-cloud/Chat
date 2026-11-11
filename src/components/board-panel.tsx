@@ -57,7 +57,7 @@ export function BoardPanel({
     selectBoard,
     renameBoard,
     deleteBoard,
-    addMessageToBoard,
+    addMessageToBoardSmart,
     addConversationToBoard,
     addNote,
     moveNode,
@@ -285,8 +285,7 @@ export function BoardPanel({
                 className="gap-2"
                 onClick={() => {
                   if (!activeConversation) return
-                  const ok = addMessageToBoard(activeConversation.id, m.id)
-                  toast[ok ? "success" : "info"](ok ? "已加入画板" : "该消息已在画板上")
+                  addMessageToBoardSmart(activeConversation.id, m.id)
                 }}
               >
                 <span className="shrink-0 text-[10px] text-muted-foreground">
