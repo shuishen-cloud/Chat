@@ -65,6 +65,12 @@ CASE=--list node scripts/test-quick-ask.cjs
 | `runEdgeKeyboard` | 选中线按 Enter / Ctrl+Enter 执行 |
 | `thinkingToggle` | 关闭思考后请求体不含非标字段 |
 | `historyRendering` | 历史区含时间/提示词/输入摘要 |
+| `noteRendersMarkdown` | 便签渲染 Markdown 而非原始符号 |
+| `noteEditMode` | 点击进入编辑态，退出后保存 |
+| `edgeExecutingAnimation` | 执行中的边带流动动画 |
+| `connectFromEdges` | 偏离手柄中心仍能起线 |
+| `boardWidthResize` | 拖拽调整画板宽度并持久化 |
+| `boardMaximize` | 一键最大化画板 |
 | `selectionSerializesStructure` | 选区还原 Markdown：表格/代码块/列表结构正确 |
 | `selectionAddToBoard` | 划词加入**指定**画板，片段保留结构 |
 
