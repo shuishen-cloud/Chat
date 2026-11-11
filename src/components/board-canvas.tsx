@@ -347,7 +347,9 @@ function InnerFlow({
   const lastEdgeRef = useRef<string | null>(null)
   /** 键盘监听里需要最新 onRunEdge，用 ref 避免反复解绑 */
   const runEdgeRef = useRef(onRunEdge)
-  runEdgeRef.current = onRunEdge
+  useEffect(() => {
+    runEdgeRef.current = onRunEdge
+  }, [onRunEdge])
   /** 边编辑器打开时按 Esc 关闭 */
   const closeEditor = useCallback(() => setEditingEdgeId(null), [])
 

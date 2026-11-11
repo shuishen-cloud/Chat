@@ -60,12 +60,28 @@ export interface BoardNodeEntry {
 }
 
 export function useChatStore() {
-  const [state, setState] = useState<ChatState>(() => loadState())
+  const [state, setRawState] = useState<ChatState>(() => loadState())
   /** 供内部触发「打开设置」对话框 */
   const openSettingsRef = useRef<(() => void) | null>(null)
   /** 始终指向最新 state：异步循环里避免读到过期闭包 */
   const stateRef = useRef(state)
-  stateRef.current = state
+
+  /**
+   * 包一层 setState，在更新发生时同步刷新 stateRef。
+   *
+   * 不在渲染期间写 ref（React 不允许），也不用 useEffect（会晚一帧，
+   * 而 runTask 的 for 循环需要立即读到上一条线刚写入的结果）。
+   */
+  const setState = useCallback(
+    (updater: ChatState | ((prev: ChatState) => ChatState)) => {
+      setRawState((prev) => {
+        const next = typeof updater === "function" ? updater(prev) : updater
+        stateRef.current = next
+        return next
+      })
+    },
+    []
+  )
   const abortRef = useRef<AbortController | null>(null)
   const [streamingConvId, setStreamingConvId] = useState<string | null>(null)
 
@@ -89,7 +105,7 @@ export function useChatStore() {
         activeConversationId: c.id,
       }
     })
-  }, [])
+  }, [setState])
 
   const projects = state.projects
 
@@ -210,7 +226,7 @@ export function useChatStore() {
       activeConversationId: c.id,
     }))
     return p
-  }, [])
+  }, [setState])
 
   const renameProject = useCallback((id: string, name: string) => {
     setState((prev) => ({
@@ -219,7 +235,7 @@ export function useChatStore() {
         p.id === id ? { ...p, name: name.trim() || p.name } : p
       ),
     }))
-  }, [])
+  }, [setState])
 
   const deleteProject = useCallback((id: string) => {
     setState((prev) => {
@@ -243,7 +259,7 @@ export function useChatStore() {
         activeConversationId,
       })
     })
-  }, [])
+  }, [setState])
 
   const selectProject = useCallback((id: string) => {
     setState((prev) => {
@@ -256,7 +272,7 @@ export function useChatStore() {
         activeConversationId: convs[0]?.id ?? null,
       }
     })
-  }, [])
+  }, [setState])
 
   /**
    * 原子地跳转到指定对话：同时切换项目与对话。
@@ -273,7 +289,7 @@ export function useChatStore() {
         activeConversationId: target.id,
       }
     })
-  }, [])
+  }, [setState])
 
   /**
    * 跳转并定位到某条消息：切项目 + 切对话 + 回对话视图，再把消息滚到可视区。
@@ -293,7 +309,7 @@ export function useChatStore() {
       })
       if (messageId) scrollMessageIntoView(messageId)
     },
-    []
+    [setState]
   )
 
   /* ---------------- 会话 ---------------- */
@@ -308,11 +324,11 @@ export function useChatStore() {
         activeConversationId: c.id,
       }
     })
-  }, [])
+  }, [setState])
 
   const selectConversation = useCallback((id: string) => {
     setState((prev) => ({ ...prev, activeConversationId: id }))
-  }, [])
+  }, [setState])
 
   const renameConversation = useCallback((id: string, title: string) => {
     setState((prev) => ({
@@ -321,7 +337,7 @@ export function useChatStore() {
         c.id === id ? { ...c, title: title.trim() || c.title } : c
       ),
     }))
-  }, [])
+  }, [setState])
 
   const deleteConversation = useCallback((id: string) => {
     setState((prev) => {
@@ -334,7 +350,7 @@ export function useChatStore() {
           : prev.activeConversationId
       return withBoardGc({ ...prev, conversations, activeConversationId })
     })
-  }, [])
+  }, [setState])
 
   const clearConversation = useCallback((id: string) => {
     setState((prev) =>
@@ -347,7 +363,7 @@ export function useChatStore() {
         ),
       })
     )
-  }, [])
+  }, [setState])
 
   const moveConversation = useCallback((convId: string, projectId: string) => {
     setState((prev) => ({
@@ -356,7 +372,7 @@ export function useChatStore() {
         c.id === convId ? { ...c, projectId, updatedAt: Date.now() } : c
       ),
     }))
-  }, [])
+  }, [setState])
 
   const togglePin = useCallback((id: string) => {
     setState((prev) => ({
@@ -365,7 +381,7 @@ export function useChatStore() {
         c.id === id ? { ...c, pinned: !c.pinned } : c
       ),
     }))
-  }, [])
+  }, [setState])
 
   const toggleArchive = useCallback((id: string) => {
     setState((prev) => ({
@@ -374,7 +390,7 @@ export function useChatStore() {
         c.id === id ? { ...c, archived: !c.archived } : c
       ),
     }))
-  }, [])
+  }, [setState])
 
   /** 将全部已归档对话恢复 */
   const unarchiveAll = useCallback((projectId: string) => {
@@ -384,7 +400,7 @@ export function useChatStore() {
         c.projectId === projectId && c.archived ? { ...c, archived: false } : c
       ),
     }))
-  }, [])
+  }, [setState])
 
   /** 复制会话（含全部消息，重置分支来源） */
   const duplicateConversation = useCallback((id: string) => {
@@ -413,7 +429,7 @@ export function useChatStore() {
         activeConversationId: copy.id,
       }
     })
-  }, [])
+  }, [setState])
 
   /* ---------------- 收藏 ---------------- */
 
@@ -436,7 +452,7 @@ export function useChatStore() {
         ],
       }
     })
-  }, [])
+  }, [setState])
 
   /** 给收藏项设置标签 */
   const setFavoriteTags = useCallback(
@@ -448,7 +464,7 @@ export function useChatStore() {
         ),
       }))
     },
-    []
+    [setState]
   )
 
   /** 设置收藏备注 */
@@ -459,7 +475,7 @@ export function useChatStore() {
         f.id === favoriteId ? { ...f, note } : f
       ),
     }))
-  }, [])
+  }, [setState])
 
   /** 原子地「收藏并写入备注」：已收藏则更新备注，未收藏则新建 */
   const favoriteWithNote = useCallback(
@@ -485,7 +501,7 @@ export function useChatStore() {
         }
       })
     },
-    []
+    [setState]
   )
 
   /** 批量取消收藏 */
@@ -495,7 +511,7 @@ export function useChatStore() {
       ...prev,
       favorites: prev.favorites.filter((f) => !set.has(f.id)),
     }))
-  }, [])
+  }, [setState])
 
   /** 批量打标签 */
   const tagFavorites = useCallback((ids: string[], tagId: string) => {
@@ -508,7 +524,7 @@ export function useChatStore() {
           : f
       ),
     }))
-  }, [])
+  }, [setState])
 
   /* ---------------- 标签 ---------------- */
 
@@ -529,7 +545,7 @@ export function useChatStore() {
       }
     })
     return newId
-  }, [])
+  }, [setState])
 
   const renameTag = useCallback((id: string, name: string) => {
     const trimmed = name.trim()
@@ -538,7 +554,7 @@ export function useChatStore() {
       ...prev,
       tags: prev.tags.map((t) => (t.id === id ? { ...t, name: trimmed } : t)),
     }))
-  }, [])
+  }, [setState])
 
   /** 删除标签，并从所有收藏项上摘除 */
   const deleteTag = useCallback((id: string) => {
@@ -551,7 +567,7 @@ export function useChatStore() {
           : f
       ),
     }))
-  }, [])
+  }, [setState])
 
   /** 标签使用计数 */
   const tagCounts = useMemo(() => {
@@ -630,7 +646,7 @@ export function useChatStore() {
 
   const setMainView = useCallback((view: ChatState["mainView"]) => {
     setState((prev) => ({ ...prev, mainView: view }))
-  }, [])
+  }, [setState])
 
   /** 新建画板并切换过去，若当前项目已有画板则直接切换 */
   const addBoard = useCallback((name?: string): Board => {
@@ -642,7 +658,7 @@ export function useChatStore() {
       mainView: "board",
     }))
     return board
-  }, [])
+  }, [setState])
 
   const selectBoard = useCallback((id: string) => {
     setState((prev) => ({
@@ -650,7 +666,7 @@ export function useChatStore() {
       activeBoardId: id,
       mainView: "board",
     }))
-  }, [])
+  }, [setState])
 
   const renameBoard = useCallback((id: string, name: string) => {
     setState((prev) => ({
@@ -659,7 +675,7 @@ export function useChatStore() {
         b.id === id ? { ...b, name: name.trim() || b.name } : b
       ),
     }))
-  }, [])
+  }, [setState])
 
   /** 删除画板及其全部节点与连线 */
   const deleteBoard = useCallback((id: string) => {
@@ -674,7 +690,7 @@ export function useChatStore() {
           prev.activeBoardId === id ? (boards[0]?.id ?? null) : prev.activeBoardId,
       }
     })
-  }, [])
+  }, [setState])
 
   /**
    * 批量把多条消息加入指定画板。
@@ -720,7 +736,7 @@ export function useChatStore() {
       })
       return { added, skipped }
     },
-    []
+    [setState]
   )
 
   /**
@@ -765,7 +781,7 @@ export function useChatStore() {
       })
       return created
     },
-    []
+    [setState]
   )
 
   /**
@@ -803,7 +819,7 @@ export function useChatStore() {
       })
       return created
     },
-    []
+    [setState]
   )
 
   /** 把整段对话按消息顺序铺成一条链，适合先得到骨架再整理 */
@@ -868,7 +884,7 @@ export function useChatStore() {
       })
       return count
     },
-    []
+    [setState]
   )
 
   /** 新建便签 */
@@ -895,7 +911,7 @@ export function useChatStore() {
         ),
       }
     })
-  }, [])
+  }, [setState])
 
   /**
    * 拖拽结束才提交坐标。
@@ -915,7 +931,7 @@ export function useChatStore() {
         ),
       }
     })
-  }, [])
+  }, [setState])
 
   const updateNode = useCallback(
     (
@@ -934,7 +950,7 @@ export function useChatStore() {
         ),
       }))
     },
-    []
+    [setState]
   )
 
   const removeNodes = useCallback((nodeIds: string[]) => {
@@ -946,7 +962,7 @@ export function useChatStore() {
         (e) => !set.has(e.from) && !set.has(e.to)
       ),
     }))
-  }, [])
+  }, [setState])
 
   /** 连接两个节点；不允许自环与重复边 */
   /**
@@ -975,7 +991,7 @@ export function useChatStore() {
         }
       })
     },
-    []
+    [setState]
   )
 
   const removeEdge = useCallback((edgeId: string) => {
@@ -988,7 +1004,7 @@ export function useChatStore() {
           : t
       ),
     }))
-  }, [])
+  }, [setState])
 
   /* ---------------- 连线编辑 ---------------- */
 
@@ -1001,7 +1017,7 @@ export function useChatStore() {
         ),
       }))
     },
-    []
+    [setState]
   )
 
   /** 切换「可执行 / 仅联系」 */
@@ -1014,7 +1030,7 @@ export function useChatStore() {
           : e
       ),
     }))
-  }, [])
+  }, [setState])
 
   const toggleEdgeEnabled = useCallback((edgeId: string) => {
     setState((prev) => ({
@@ -1023,7 +1039,7 @@ export function useChatStore() {
         e.id === edgeId ? { ...e, enabled: e.enabled === false } : e
       ),
     }))
-  }, [])
+  }, [setState])
 
   /* ---------------- 任务 ---------------- */
 
@@ -1040,7 +1056,7 @@ export function useChatStore() {
       }
     })
     return created
-  }, [])
+  }, [setState])
 
   const renameTask = useCallback((taskId: string, name: string) => {
     setState((prev) => ({
@@ -1049,7 +1065,7 @@ export function useChatStore() {
         t.id === taskId ? { ...t, name: name.trim() || t.name, updatedAt: Date.now() } : t
       ),
     }))
-  }, [])
+  }, [setState])
 
   const deleteTask = useCallback((taskId: string) => {
     setState((prev) => {
@@ -1061,11 +1077,11 @@ export function useChatStore() {
           prev.activeTaskId === taskId ? (tasks[0]?.id ?? null) : prev.activeTaskId,
       }
     })
-  }, [])
+  }, [setState])
 
   const selectTask = useCallback((taskId: string | null) => {
     setState((prev) => ({ ...prev, activeTaskId: taskId }))
-  }, [])
+  }, [setState])
 
   /** 把边加入 / 移出任务 */
   const toggleTaskEdge = useCallback((taskId: string, edgeId: string) => {
@@ -1083,7 +1099,7 @@ export function useChatStore() {
         }
       }),
     }))
-  }, [])
+  }, [setState])
 
   /* ---------------- 颜色标记 ---------------- */
 
@@ -1092,14 +1108,14 @@ export function useChatStore() {
       ...prev,
       boardNodes: prev.boardNodes.map((n) => (n.id === nodeId ? { ...n, hue } : n)),
     }))
-  }, [])
+  }, [setState])
 
   const setEdgeHue = useCallback((edgeId: string, hue: number | undefined) => {
     setState((prev) => ({
       ...prev,
       boardEdges: prev.boardEdges.map((e) => (e.id === edgeId ? { ...e, hue } : e)),
     }))
-  }, [])
+  }, [setState])
 
   const setConversationHue = useCallback(
     (conversationId: string, hue: number | undefined) => {
@@ -1110,12 +1126,12 @@ export function useChatStore() {
         ),
       }))
     },
-    []
+    [setState]
   )
 
   const setSidebarView = useCallback((view: ChatState["sidebarView"]) => {
     setState((prev) => ({ ...prev, sidebarView: view }))
-  }, [])
+  }, [setState])
 
   /* ---------------- 搜索 ---------------- */
 
@@ -1143,7 +1159,7 @@ export function useChatStore() {
     ) => {
       setState((prev) => ({ ...prev, ...patch }))
     },
-    []
+    [setState]
   )
 
   /* ---------------- 发消息 ---------------- */
@@ -1157,7 +1173,7 @@ export function useChatStore() {
         ),
       }))
     },
-    []
+    [setState]
   )
 
   const stop = useCallback(() => {
@@ -1324,6 +1340,7 @@ export function useChatStore() {
       state.conversations,
       streamingConvId,
       updateMessages,
+      setState,
     ]
   )
 
@@ -1350,7 +1367,7 @@ export function useChatStore() {
       }))
       await send(lastUser.content)
     },
-    [send, streamingConvId]
+    [send, streamingConvId, setState]
   )
 
   /**
@@ -1427,7 +1444,7 @@ export function useChatStore() {
 
       return newConvId
     },
-    []
+    [setState]
   )
 
   /* ---------------- 执行任务 ---------------- */
@@ -1530,7 +1547,7 @@ export function useChatStore() {
         return "failed"
       }
     },
-    []
+    [setState]
   )
 
   /** 准备工作：校验 Key、构造 controller */
@@ -1662,7 +1679,7 @@ export function useChatStore() {
         return { ...n, contentOverride: run.output }
       }),
     }))
-  }, [])
+  }, [setState])
 
   /** 清空引用节点的改写，回到原始消息内容 */
   const restoreNodeContent = useCallback((nodeId: string) => {
@@ -1674,7 +1691,7 @@ export function useChatStore() {
         return rest
       }),
     }))
-  }, [])
+  }, [setState])
 
   const exportMarkdown = useCallback((conv: Conversation) => {
     const md = conv.messages

@@ -851,6 +851,8 @@ cases.colorConversation = async (t) => {
   await t.seed(seedFlow())
   await t.untilVisible("aside")
 
+  const row = t.page.locator("aside").getByText("状态管理").first()
+  await row.hover()
   await t.page
     .locator("aside")
     .getByRole("button", { name: "会话操作" })
