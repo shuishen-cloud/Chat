@@ -30,6 +30,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { Markdown } from "@/components/markdown"
 import type { ChatStore } from "@/hooks/use-chat-store"
 import type { Tag } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -55,8 +56,7 @@ export function FavoritesPanel({ open, onOpenChange, store }: Props) {
     addTag,
     renameTag,
     deleteTag,
-    selectConversation,
-    selectProject,
+    jumpToConversation,
   } = store
 
   const [query, setQuery] = useState("")
@@ -146,9 +146,8 @@ export function FavoritesPanel({ open, onOpenChange, store }: Props) {
     return [...map.entries()]
   }, [filtered, group])
 
-  function jumpTo(convId: string, projectId: string) {
-    selectProject(projectId)
-    selectConversation(convId)
+  function jumpTo(convId: string) {
+    jumpToConversation(convId)
     onOpenChange(false)
   }
 
@@ -516,7 +515,7 @@ export function FavoritesPanel({ open, onOpenChange, store }: Props) {
                             <button
                               type="button"
                               onClick={() =>
-                                jumpTo(conversation.id, conversation.projectId)
+                                jumpTo(conversation.id)
                               }
                               className="flex min-w-0 flex-1 items-center gap-1 text-left text-[11px] text-muted-foreground hover:text-foreground"
                               title={conversation.title}
@@ -528,17 +527,13 @@ export function FavoritesPanel({ open, onOpenChange, store }: Props) {
 
                           <button
                             type="button"
-                            onClick={() => jumpTo(conversation.id, conversation.projectId)}
+                            onClick={() => jumpTo(conversation.id)}
                             className="line-clamp-3 w-full text-left text-xs leading-relaxed whitespace-pre-wrap break-words"
                           >
                             {message.content}
                           </button>
 
-                          {favorite.note && (
-                            <div className="mt-1 rounded bg-muted/60 px-1.5 py-1 text-[11px] text-muted-foreground">
-                              {favorite.note}
-                            </div>
-                          )}
+                          {favorite.note && <FavoriteNote note={favorite.note} />}
 
                           {itemTags.length > 0 && (
                             <div className="mt-1.5 flex flex-wrap gap-1">
@@ -658,6 +653,59 @@ export function FavoritesPanel({ open, onOpenChange, store }: Props) {
 }
 
 /* ------------------------------------------------------------------ */
+
+/**
+ * 收藏备注：若为浮窗追问产生的「Q：… A：…」格式，解析成结构化问答展示。
+ */
+function FavoriteNote({ note }: { note: string }) {
+  const qa = parseQA(note)
+  if (!qa) {
+    return (
+      <div className="mt-1 rounded bg-muted/60 px-1.5 py-1 text-[11px] whitespace-pre-wrap text-muted-foreground">
+        {note}
+      </div>
+    )
+  }
+  return (
+    <div className="mt-1 space-y-1">
+      {qa.map((seg, i) => (
+        <div
+          key={i}
+          className="rounded bg-muted/60 px-1.5 py-1 text-[11px] leading-relaxed"
+        >
+          <span
+            className={cn(
+              "mr-1 rounded px-1 py-0.5 text-[10px] font-medium",
+              seg.kind === "Q"
+                ? "bg-secondary text-secondary-foreground"
+                : "bg-background text-muted-foreground"
+            )}
+          >
+            {seg.kind === "Q" ? "追问" : "回答"}
+          </span>
+          {seg.kind === "A" ? (
+            <Markdown content={seg.text} className="inline text-[11px]" />
+          ) : (
+            <span className="whitespace-pre-wrap">{seg.text}</span>
+          )}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+/** 解析「Q：…\n\nA：…」格式，失败返回 null */
+function parseQA(note: string): Array<{ kind: "Q" | "A"; text: string }> | null {
+  const idx = note.indexOf("Q：")
+  if (idx === -1) return null
+  const body = note.slice(idx)
+  const m = body.match(/^Q：([\s\S]*?)\n\nA：([\s\S]*)$/)
+  if (!m) return null
+  return [
+    { kind: "Q", text: m[1].trim() },
+    { kind: "A", text: m[2].trim() },
+  ]
+}
 
 /** 今天/昨天显示相对时间，更早显示日期 */
 function formatDate(ts: number): string {

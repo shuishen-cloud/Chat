@@ -390,6 +390,54 @@ function scrollbarThemeCase() {
   })
 }
 
+/** 收藏跳转不被项目默认对话覆盖 + 浮窗问答结构化展示 */
+function favoriteJumpCase() {
+  return run(async (t) => {
+    await t.mockReply("**Zustand** 更轻量。")
+    await t.seed({
+      projects: [
+        { id: "p1", name: "项目A", createdAt: 1 },
+        { id: "p2", name: "项目B", createdAt: 1 },
+      ],
+      conversations: [
+        { id: "c1", projectId: "p1", title: "A-旧对话", createdAt: 1, updatedAt: 1,
+          messages: [{ id: "m1", role: "assistant", content: "A项目旧对话的内容段落。", createdAt: 1 }] },
+        { id: "c2", projectId: "p1", title: "A-新对话", createdAt: 1, updatedAt: 9,
+          messages: [{ id: "m2", role: "assistant", content: "A项目新对话的内容段落。", createdAt: 1 }] },
+        { id: "c3", projectId: "p2", title: "B-对话", createdAt: 1, updatedAt: 5,
+          messages: [{ id: "m3", role: "assistant", content: "B项目的内容段落。", createdAt: 1 }] },
+      ],
+      favorites: [
+        { id: "f1", conversationId: "c1", messageId: "m1", tagIds: [], createdAt: 3 },
+        { id: "f2", conversationId: "c3", messageId: "m3", tagIds: [], createdAt: 2 },
+      ],
+      tags: [], activeProjectId: "p1", activeConversationId: "c2",
+      apiKey: "sk-t", baseUrl: "https://api.deepseek.com",
+      model: "deepseek-v4-pro", sidebarView: "list",
+    })
+
+    const panel = t.page.locator("[data-aux-panel='favorites']")
+    const openFav = async () => {
+      await t.page.locator("aside button").filter({ hasText: /^收藏/ }).first().click()
+      await t.page.waitForTimeout(300)
+    }
+
+    // 同项目内跨对话：不能落到项目默认（最新）对话 c2
+    await openFav()
+    await panel.getByText("A项目旧对话的内容段落").first().click()
+    await t.page.waitForTimeout(400)
+    t.eq((await t.state()).activeConversationId, "c1", "跳转到指定对话")
+
+    // 跨项目
+    await openFav()
+    await panel.getByText("B项目的内容段落").first().click()
+    await t.page.waitForTimeout(400)
+    const st = await t.state()
+    t.eq(st.activeProjectId, "p2", "跨项目：项目已切换")
+    t.eq(st.activeConversationId, "c3", "跨项目：对话正确")
+  })
+}
+
 if (require.main === module) {
   const cases = {
     main: mainCase,
@@ -400,6 +448,7 @@ if (require.main === module) {
     history: historyPerConversationCase,
     historyauto: historyAutoCase,
     scrollbar: scrollbarThemeCase,
+    favoritejump: favoriteJumpCase,
   }
   const pick = process.env.CASE || "main"
   const fn = cases[pick]

@@ -229,6 +229,23 @@ export function useChatStore() {
     })
   }, [])
 
+  /**
+   * 原子地跳转到指定对话：同时切换项目与对话。
+   * 不能拆成 selectProject + selectConversation，因为前者会把
+   * activeConversationId 重置为该项目最新对话，后者再改会被覆盖。
+   */
+  const jumpToConversation = useCallback((conversationId: string) => {
+    setState((prev) => {
+      const target = prev.conversations.find((c) => c.id === conversationId)
+      if (!target) return prev
+      return {
+        ...prev,
+        activeProjectId: target.projectId,
+        activeConversationId: target.id,
+      }
+    })
+  }, [])
+
   /* ---------------- 会话 ---------------- */
 
   const addConversation = useCallback(() => {
@@ -837,6 +854,7 @@ export function useChatStore() {
     renameProject,
     deleteProject,
     selectProject,
+    jumpToConversation,
     addConversation,
     selectConversation,
     renameConversation,
