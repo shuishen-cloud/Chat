@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { Clock, Copy, Search, Trash2, X } from "lucide-react"
+import { Clock, Copy, Search, X } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -188,16 +188,6 @@ export function usePromptHistory(conversations: Conversation[] = []) {
     []
   )
 
-  const remove = useCallback((conversationId: string, id: string) => {
-    setMap((prev) => ({
-      ...prev,
-      [conversationId]: (prev[conversationId] ?? []).filter((i) => i.id !== id),
-    }))
-  }, [])
-
-  const clear = useCallback((conversationId: string) => {
-    setMap((prev) => ({ ...prev, [conversationId]: [] }))
-  }, [])
 
   /**
    * 某个对话的历史：显式记录 + 该对话内的 user 消息（去重合并）。
@@ -239,7 +229,7 @@ export function usePromptHistory(conversations: Conversation[] = []) {
     [map]
   )
 
-  return { map, record, remove, clear, getItems, totalCount }
+  return { map, record, getItems, totalCount }
 }
 
 export type PromptHistoryApi = ReturnType<typeof usePromptHistory>
@@ -268,7 +258,7 @@ export function PromptHistoryPanel({
   onPick,
 }: PanelProps) {
   const [query, setQuery] = useState("")
-  const { remove, clear, getItems } = history
+  const { getItems } = history
   const items = getItems(conversationId)
 
   useEffect(() => {
@@ -343,20 +333,6 @@ export function PromptHistoryPanel({
             size="icon"
             variant="ghost"
             className="size-6"
-            title="清空本对话历史"
-            disabled={!conversationId || items.length === 0}
-            onClick={() => {
-              if (!conversationId) return
-              clear(conversationId)
-              toast.success("已清空本对话历史")
-            }}
-          >
-            <Trash2 className="size-3.5" />
-          </Button>
-          <Button
-            size="icon"
-            variant="ghost"
-            className="size-6"
             onClick={() => onOpenChange(false)}
           >
             <X className="size-3.5" />
@@ -417,14 +393,6 @@ export function PromptHistoryPanel({
                         title="复制"
                       >
                         <Copy className="size-3" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => conversationId && remove(conversationId, item.id)}
-                        className="opacity-0 transition-opacity group-hover/ph:opacity-100 hover:text-destructive"
-                        title="删除"
-                      >
-                        <X className="size-3" />
                       </button>
                     </div>
                   </div>

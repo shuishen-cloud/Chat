@@ -438,6 +438,36 @@ function favoriteJumpCase() {
   })
 }
 
+/** 提示词历史不提供删除：数据源自对话内容，删除无效 */
+function historyNoDeleteCase() {
+  return run(async (t) => {
+    await t.seed({
+      projects: [{ id: "p1", name: "前端", createdAt: 1 }],
+      conversations: [
+        { id: "c1", projectId: "p1", title: "对话", createdAt: 1, updatedAt: 1,
+          messages: [
+            { id: "u1", role: "user", content: "历史提问一", createdAt: 1_700_000_000_000 },
+            { id: "a1", role: "assistant", content: "回答一", createdAt: 1_700_000_001_000 },
+          ] },
+      ],
+      favorites: [], tags: [], activeProjectId: "p1", activeConversationId: "c1",
+      apiKey: "sk-t", baseUrl: "https://api.deepseek.com",
+      model: "deepseek-v4-pro", sidebarView: "list",
+    })
+
+    await t.page.locator("button[title^='「']").first().click()
+    await t.page.waitForTimeout(300)
+    const panel = t.page.locator("[data-aux-panel='prompt-history']")
+    const btns = await panel
+      .locator("button")
+      .evaluateAll((els) => els.map((e) => e.getAttribute("title")))
+
+    t.ok(!btns.includes("删除"), "没有单条删除")
+    t.ok(!btns.some((x) => x && x.includes("清空")), "没有清空按钮")
+    t.ok(btns.includes("复制"), "保留复制")
+  })
+}
+
 if (require.main === module) {
   const cases = {
     main: mainCase,
@@ -449,6 +479,7 @@ if (require.main === module) {
     historyauto: historyAutoCase,
     scrollbar: scrollbarThemeCase,
     favoritejump: favoriteJumpCase,
+    historynodelete: historyNoDeleteCase,
   }
   const pick = process.env.CASE || "main"
   const fn = cases[pick]
