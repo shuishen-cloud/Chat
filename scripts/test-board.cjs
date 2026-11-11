@@ -85,11 +85,14 @@ const cases = {
     await t.page.getByRole("button", { name: "新建便签" }).click()
     await t.untilState((s) => s.boardNodes.length === 1)
 
+    // 新便签内容为空，默认是渲染态；点占位文字进入编辑态
+    await t.page.locator(".react-flow__node").first().click()
     const ta = t.page.locator(".react-flow__node textarea")
     await ta.waitFor({ state: "visible" })
     await ta.fill("先把方案列成三类")
+    await t.page.keyboard.press("Escape")
     await t.untilState(
-      (s) => s.boardNodes[0]?.note === "先把方案列成三类",
+      (s) => s.boardNodes[0]?.contentOverride === "先把方案列成三类",
       3000
     )
     t.eq((await t.state()).boardNodes[0].kind, "note", "便签类型正确")
@@ -1065,8 +1068,8 @@ cases.noteShowsOutput = async (t) => {
 
   const note = t.page.locator(".react-flow__node[data-id='b']")
   await note.waitFor({ state: "visible" })
-  // 不打开历史，正文里就应该能看到产出
-  t.eq(await note.locator("textarea").inputValue(), "执行产出的结果", "便签正文显示产出")
+  // 不打开历史，正文里就应该能看到产出（渲染态直接显示）
+  t.ok((await note.innerText()).includes("执行产出的结果"), "便签正文显示产出")
   t.ok((await note.innerText()).includes("已产出"), "有「已产出」标记")
 
   // 退回手写内容
@@ -1093,9 +1096,12 @@ cases.noteEditWritesSameField = async (t) => {
     mainView: "board",
   })
 
+  // 空便签默认渲染态，点一下进入编辑
+  await t.page.locator(".react-flow__node[data-id='b']").click()
   const ta = t.page.locator(".react-flow__node[data-id='b'] textarea")
   await ta.waitFor({ state: "visible" })
   await ta.fill("我手写的笔记")
+  await t.page.keyboard.press("Escape")
 
   const s = await t.stateUntil(
     (x) => x.boardNodes[0]?.contentOverride === "我手写的笔记",
@@ -1301,7 +1307,7 @@ cases.edgeExecutingAnimation = async (t) => {
   t.ok(cleared, "结束后动画移除")
 }
 
-/** 从节点边沿（非手柄点）拖动也能连线 */
+/** 手柄命中区已放大：偏离手柄中心若干像素也能起线 */
 cases.connectFromEdges = async (t) => {
   const now = Date.now()
   await t.seed({
@@ -1317,12 +1323,13 @@ cases.connectFromEdges = async (t) => {
   await t.untilVisible(".react-flow__node[data-id='a']")
 
   const box = await t.page.locator(".react-flow__node[data-id='a']").boundingBox()
-  // 从节点右边缘中部（手柄之外的区域）开始拖
-  await t.page.mouse.move(box.x + box.width - 3, box.y + box.height / 2)
+  // 手柄中心在右边缘中点；故意偏离中心 ~8px（在放大后的命中区内）
+  await t.page.mouse.move(box.x + box.width - 1, box.y + box.height / 2 - 8)
   await t.page.mouse.down()
   await t.page.mouse.move(box.x + box.width + 200, box.y + box.height + 120, { steps: 12 })
   const target = await t.page.locator(".react-flow__node[data-id='b']").boundingBox()
-  await t.page.mouse.move(target.x + 20, target.y + target.height / 2, { steps: 12 })
+  // 落点也不要求正中，落在目标手柄命中区内即可
+  await t.page.mouse.move(target.x - 4, target.y + target.height / 2, { steps: 12 })
   await t.page.mouse.up()
 
   const s = await t.stateUntil((x) => x.boardEdges.length === 1, 4000, "从边沿拉出连线")

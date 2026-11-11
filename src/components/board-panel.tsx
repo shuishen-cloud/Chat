@@ -1,6 +1,9 @@
-import { useCallback, useMemo, useState } from "react"
+import { useCallback, useMemo, useRef, useState } from "react"
 import {
   ChevronDown,
+  Maximize2,
+  Minimize2,
+  Pencil,
   MousePointerSquareDashed,
   Play,
   Square,
@@ -21,6 +24,7 @@ import {
   DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import type { ChatStore } from "@/hooks/use-chat-store"
@@ -33,10 +37,15 @@ import { cn } from "@/lib/utils"
 export function BoardPanel({
   store,
   onClose,
+  onToggleMaximize,
+  maximized = false,
 }: {
   store: ChatStore
   /** 关闭画板面板（对话区始终在左侧，关掉画板即可回到全宽对话） */
   onClose: () => void
+  /** 在默认宽度与最大宽度之间切换 */
+  onToggleMaximize?: () => void
+  maximized?: boolean
 }) {
   const {
     projectBoards,
@@ -64,6 +73,8 @@ export function BoardPanel({
     activeTask,
     addTask,
     selectTask,
+    renameTask,
+    deleteTask,
     toggleTaskEdge,
     runTask,
     stopTask,
@@ -80,6 +91,11 @@ export function BoardPanel({
   const [draftName, setDraftName] = useState("")
   /** 选边模式：点线把该线加入/移出当前任务 */
   const [edgePickMode, setEdgePickMode] = useState(false)
+  /** 任务重命名 */
+  const [renamingTask, setRenamingTask] = useState(false)
+  const [taskDraft, setTaskDraft] = useState("")
+  /** 避免 Enter 提交后 onBlur 再提交一次 */
+  const submittedRef = useRef(false)
 
   /**
    * 选区回调只在内容真变时更新 state。
@@ -191,6 +207,19 @@ export function BoardPanel({
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+
+        {onToggleMaximize && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-8 text-muted-foreground"
+            title={maximized ? "还原画板宽度" : "最大化画板"}
+            aria-label={maximized ? "还原画板宽度" : "最大化画板"}
+            onClick={onToggleMaximize}
+          >
+            {maximized ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
+          </Button>
+        )}
 
         <Button
           variant="ghost"
@@ -317,7 +346,7 @@ export function BoardPanel({
                 </Button>
               }
             />
-            <DropdownMenuContent align="start" className="w-52">
+            <DropdownMenuContent align="start" className="w-60">
               <DropdownMenuGroup>
                 <DropdownMenuLabel>画板任务</DropdownMenuLabel>
                 {projectTasks.map((t) => (
@@ -333,10 +362,66 @@ export function BoardPanel({
                   </DropdownMenuItem>
                 ))}
               </DropdownMenuGroup>
+              {activeTask && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    onClick={() => {
+                      setTaskDraft(activeTask.name)
+                      setRenamingTask(true)
+                    }}
+                    className="gap-2"
+                  >
+                    <Pencil className="size-4" />
+                    重命名任务
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    variant="destructive"
+                    onClick={() => {
+                      deleteTask(activeTask.id)
+                      setEdgePickMode(false)
+                      toast.success("已删除任务")
+                    }}
+                    className="gap-2"
+                  >
+                    <Trash2 className="size-4" />
+                    删除任务
+                  </DropdownMenuItem>
+                </>
+              )}
             </DropdownMenuContent>
           </DropdownMenu>
         ) : (
           <span className="text-[11px] text-muted-foreground">还没有任务</span>
+        )}
+
+        {/* 任务重命名输入框 */}
+        {renamingTask && activeTask && (
+          <Input
+            autoFocus
+            aria-label="任务名称"
+            value={taskDraft}
+            onChange={(e) => setTaskDraft(e.target.value)}
+            onBlur={() => {
+              // 已提交过就不再重复提交（Enter 会先触发提交再失焦）
+              if (!submittedRef.current) renameTask(activeTask.id, taskDraft)
+              submittedRef.current = false
+              setRenamingTask(false)
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault()
+                submittedRef.current = true
+                renameTask(activeTask.id, taskDraft)
+                setRenamingTask(false)
+              }
+              if (e.key === "Escape") {
+                submittedRef.current = true
+                setRenamingTask(false)
+              }
+            }}
+            className="h-7 w-32 text-[11px]"
+          />
         )}
 
         <Button
@@ -436,7 +521,9 @@ export function BoardPanel({
               if (node) updateNode(id, { expanded: !node.expanded })
             }}
             onJump={jumpToMessage}
-            onEditNote={(id, text) => updateNode(id, { note: text })}
+            // 便签的正文统一写 contentOverride：与执行结果同一字段，
+            // 这样「改完再跑」「跑完再改」都不会出现两套内容互相遮蔽
+            onEditNote={(id, text) => updateNode(id, { contentOverride: text })}
             onResizeNode={(id, width, height) => updateNode(id, { width, height })}
             onSelectionChange={handleSelectionChange}
           />

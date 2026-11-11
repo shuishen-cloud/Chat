@@ -10,6 +10,7 @@ import {
   NodeResizer,
   ReactFlow,
   ReactFlowProvider,
+  ConnectionMode,
   type Connection,
   type Edge,
   type Node,
@@ -199,6 +200,21 @@ function InnerFlow({
     []
   )
 
+  /** 是否正在拉线：拉线过程中才让节点表面成为落点 */
+  const [connecting, setConnecting] = useState(false)
+
+  /**
+   * 正在执行的边 id 集合。
+   * 当前为串行执行，同一时刻最多一条；仍按数组处理，为将来并发留余地。
+   */
+  const runningEdgeIds = useMemo(
+    () =>
+      runningEdgeId?.startsWith("edge:")
+        ? [runningEdgeId.slice("edge:".length)]
+        : [],
+    [runningEdgeId]
+  )
+
   /*
    * 受控模式下必须提供 onNodesChange，否则 React Flow 内部的选中变更
    * （select 类型）无处落地，节点永远进不了 selected 状态，
@@ -312,21 +328,26 @@ function InnerFlow({
             runnable && "board-edge-flow",
             disabled && "board-edge-disabled",
             selected && "board-edge-selected",
-            edgeSelectMode && "board-edge-selectable"
+            edgeSelectMode && "board-edge-selectable",
+            runningEdgeIds.includes(e.id) && "board-edge-executing"
           ),
           labelClassName: cn(
             "board-edge-label",
-            runnable && "board-edge-label-flow",
+            runnable && e.promptHue === undefined && "board-edge-label-flow",
             disabled && "board-edge-label-disabled",
             selected && "board-edge-label-selected"
           ),
+          labelStyle:
+            e.promptHue !== undefined
+              ? { fill: hueStroke(e.promptHue, dark) }
+              : undefined,
           markerEnd: { type: "arrowclosed" as const, width: 16, height: 16 },
           // 有标记色时用色相覆盖默认主题色
           style: e.hue !== undefined ? { stroke: hueStroke(e.hue, dark) } : undefined,
           data: { kind: e.kind },
         }
       }),
-    [edges, selectedEdgeIds, edgeSelectMode, dark]
+    [edges, selectedEdgeIds, edgeSelectMode, dark, runningEdgeIds]
   )
 
   const handleConnect = useCallback(
@@ -342,6 +363,8 @@ function InnerFlow({
 
   /** 点线：选边模式下加入任务，否则打开提示词编辑器 */
   const [editingEdgeId, setEditingEdgeId] = useState<string | null>(null)
+  /** 编辑器悬浮位置：跟随点击处 */
+  const [edgeAnchor, setEdgeAnchor] = useState({ x: 0, y: 0 })
 
   /** 最近点选过的边：供 Enter 快捷键执行 */
   const lastEdgeRef = useRef<string | null>(null)
@@ -354,7 +377,7 @@ function InnerFlow({
   const closeEditor = useCallback(() => setEditingEdgeId(null), [])
 
   const handleEdgeClick = useCallback(
-    (_: unknown, edge: Edge) => {
+    (event: React.MouseEvent, edge: Edge) => {
       const source = edges.find((e) => e.id === edge.id)
       if (edgeSelectMode) {
         // 只有可执行的线才能选进任务
@@ -362,6 +385,13 @@ function InnerFlow({
         return
       }
       lastEdgeRef.current = edge.id
+      // 用屏幕坐标定位悬浮窗；拿不到事件时退回相对位置
+      const rect = (event?.currentTarget as HTMLElement | null)?.getBoundingClientRect?.()
+      setEdgeAnchor(
+        rect
+          ? { x: rect.left + rect.width / 2, y: rect.top }
+          : { x: window.innerWidth / 2, y: 160 }
+      )
       setEditingEdgeId(edge.id)
     },
     [edgeSelectMode, edges, onToggleTaskEdge]
@@ -407,7 +437,7 @@ function InnerFlow({
   const editingEdge = edges.find((e) => e.id === editingEdgeId) ?? null
 
   return (
-    <>
+    <div className={cn("relative h-full w-full", connecting && "board-connecting")}>
       <ReactFlow
         nodes={displayNodes}
         edges={flowEdges}
@@ -417,6 +447,9 @@ function InnerFlow({
         onNodeDrag={handleDrag}
         onNodeDragStop={handleDragStop}
         onConnect={handleConnect}
+        onConnectStart={() => setConnecting(true)}
+        onConnectEnd={() => setConnecting(false)}
+        connectionMode={ConnectionMode.Loose}
         onEdgeClick={handleEdgeClick}
       onEdgeDoubleClick={(_, edge) => onRunEdge(edge.id)}
         onEdgesDelete={(removed) => removed.forEach((e) => onRemoveEdge(e.id))}
@@ -436,6 +469,7 @@ function InnerFlow({
       {editingEdge && (
         <EdgeEditor
           edge={editingEdge}
+          anchor={edgeAnchor}
           running={runningEdgeId === `edge:${editingEdge.id}`}
           onClose={() => setEditingEdgeId(null)}
           onUpdate={(patch) => onUpdateEdge(editingEdge.id, patch)}
@@ -449,7 +483,7 @@ function InnerFlow({
           }}
         />
       )}
-    </>
+    </div>
   )
 }
 
@@ -458,6 +492,7 @@ function InnerFlow({
 
 function EdgeEditor({
   edge,
+  anchor,
   running,
   onClose,
   onUpdate,
@@ -468,9 +503,11 @@ function EdgeEditor({
   onDelete,
 }: {
   edge: BoardEdge
+  /** 悬浮窗定位点（屏幕坐标），来自点击位置 */
+  anchor: { x: number; y: number }
   running: boolean
   onClose: () => void
-  onUpdate: (patch: Partial<Pick<BoardEdge, "prompt">>) => void
+  onUpdate: (patch: Partial<Pick<BoardEdge, "prompt" | "promptHue">>) => void
   onToggleKind: () => void
   onToggleEnabled: () => void
   onSetHue: (hue: number | undefined) => void
@@ -481,15 +518,16 @@ function EdgeEditor({
   const runnable = edge.kind === "flow"
 
   return (
+    // 不用全屏遮罩：点其他线/卡片时可以直接切换，不打断画布操作
     <div
-      className="absolute inset-0 z-20 flex items-center justify-center bg-background/40 backdrop-blur-[1px]"
-      onClick={onClose}
+      className="absolute z-20 w-[340px] rounded-xl border border-border bg-card p-3 shadow-xl"
+      style={{
+        left: Math.min(Math.max(anchor.x + 12, 8), Math.max(window.innerWidth - 360, 8)),
+        top: Math.min(Math.max(anchor.y - 24, 8), Math.max(window.innerHeight - 320, 8)),
+      }}
+      onClick={(e) => e.stopPropagation()}
+      onKeyDown={(e) => e.key === "Escape" && onClose()}
     >
-      <div
-        className="w-[360px] rounded-xl border border-border bg-card p-3 shadow-lg"
-        onClick={(e) => e.stopPropagation()}
-        onKeyDown={(e) => e.key === "Escape" && onClose()}
-      >
         <div className="mb-2 flex items-center gap-2">
           <Zap
             className={cn(
@@ -525,10 +563,19 @@ function EdgeEditor({
           </p>
         )}
 
-        <div className="mt-2.5 flex items-center gap-1.5">
-          <span className="text-[11px] text-muted-foreground">颜色</span>
+        <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+          <span className="w-14 shrink-0 text-[11px] text-muted-foreground">线条颜色</span>
           <HuePicker value={edge.hue} onChange={onSetHue} />
         </div>
+        {runnable && (
+          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+            <span className="w-14 shrink-0 text-[11px] text-muted-foreground">提示词色</span>
+            <HuePicker
+              value={edge.promptHue}
+              onChange={(h) => onUpdate({ promptHue: h })}
+            />
+          </div>
+        )}
 
         <div className="mt-3 flex items-center gap-1.5">
           <Button
@@ -588,14 +635,19 @@ function EdgeEditor({
             删除
           </Button>
         </div>
-      </div>
     </div>
   )
 }
 
 /* ------------------------------------------------------------------ */
 
-/** 四向连接点：每边一个 source + 一个 target */
+/**
+ * 四向连接点。
+ *
+ * 手柄的视觉很小（7px），但通过 CSS 的 ::after 把命中区扩到约 26px，
+ * 配合 connectionMode=Loose（不要求 source→target 方向匹配），
+ * 拉线时不必精确对准那个小点。
+ */
 function NodeHandles() {
   return (
     <>
@@ -617,6 +669,7 @@ function NodeHandles() {
           className="board-handle board-handle-source"
         />
       ))}
+
     </>
   )
 }
@@ -675,6 +728,7 @@ function MessageNode({ data, selected }: NodeProps<Node<BoardNodeData>>) {
         onResizeEnd={(_, p) => onResize(node.id, Math.round(p.width), Math.round(p.height))}
       />
       <NodeHandles />
+      <ConnectingSurface />
 
       <div className="flex shrink-0 items-center gap-1.5 border-b border-border/60 px-2.5 py-1.5">
         <span
@@ -829,11 +883,39 @@ function MessageNode({ data, selected }: NodeProps<Node<BoardNodeData>>) {
 }
 
 function NoteNode({ data, selected }: NodeProps<Node<BoardNodeData>>) {
-  const { entry, onRemove, onEditNote, onApplyRun, onResize, onSetHue, dark } = data
+  const {
+    entry,
+    onRemove,
+    onEditNote,
+    onApplyRun,
+    onResize,
+    onSetHue,
+    onRestore: onRestoreNote,
+    dark,
+  } = data
   const { node } = entry
   const sized = !!(node.width && node.height)
   const [showHistory, setShowHistory] = useState(false)
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState("")
   const runs = node.runs ?? []
+  /**
+   * 便签正文：执行结果（contentOverride）优先于手写内容。
+   * 这样线跑完结果直接显示在便签里，而不是只躺在历史里。
+   */
+  const body = node.contentOverride ?? node.note ?? ""
+  const produced = node.contentOverride !== undefined && node.contentOverride !== ""
+
+  const startEdit = () => {
+    setDraft(body)
+    setEditing(true)
+  }
+
+  /** 退出编辑并落盘；内容无变化则不写，避免无谓的 state 更新 */
+  const commit = () => {
+    if (draft !== body) onEditNote(node.id, draft)
+    setEditing(false)
+  }
 
   return (
     <div
@@ -866,12 +948,18 @@ function NoteNode({ data, selected }: NodeProps<Node<BoardNodeData>>) {
         onResizeEnd={(_, p) => onResize(node.id, Math.round(p.width), Math.round(p.height))}
       />
       <NodeHandles />
+      <ConnectingSurface />
 
       <div className="flex items-center gap-1.5 border-b border-current/10 px-2.5 py-1.5">
         <FileText className="size-3 shrink-0 opacity-60" />
         <span className="min-w-0 flex-1 truncate text-[11px] font-medium">
           {node.title || "便签"}
         </span>
+        {produced && (
+          <span className="shrink-0 rounded bg-current/10 px-1 text-[9px] opacity-70">
+            已产出
+          </span>
+        )}
         <NodeHueButton hue={node.hue} onSet={(h) => onSetHue(node.id, h)} />
         {runs.length > 0 && (
           <Button
@@ -895,16 +983,61 @@ function NoteNode({ data, selected }: NodeProps<Node<BoardNodeData>>) {
         </Button>
       </div>
 
-      <textarea
-        defaultValue={node.note ?? ""}
-        onChange={(e) => onEditNote(node.id, e.target.value)}
-        rows={4}
-        placeholder="写点什么…"
-        className={cn(
-          "nodrag resize-none bg-transparent px-2.5 py-2 text-xs leading-relaxed outline-none placeholder:opacity-50",
-          sized ? "min-h-0 flex-1" : ""
-        )}
-      />
+      {editing ? (
+        <textarea
+          autoFocus
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              e.preventDefault()
+              commit()
+            }
+          }}
+          rows={4}
+          placeholder="写点什么…（支持 Markdown）"
+          className={cn(
+            "nodrag resize-none bg-transparent px-2.5 py-2 text-xs leading-relaxed outline-none placeholder:opacity-50",
+            sized ? "min-h-0 flex-1 overflow-y-auto" : "max-h-[220px] overflow-y-auto"
+          )}
+        />
+      ) : (
+        <div
+          role="button"
+          tabIndex={0}
+          onClick={startEdit}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") startEdit()
+          }}
+          className={cn(
+            "nodrag cursor-text px-2.5 py-2 text-xs leading-relaxed",
+            sized ? "min-h-0 flex-1 overflow-y-auto" : "max-h-[220px] overflow-y-auto",
+            !body && "text-current/50"
+          )}
+        >
+          {body ? (
+            <Markdown content={body} className="prose-chat text-xs leading-relaxed" />
+          ) : (
+            "点击写点什么…（支持 Markdown）"
+          )}
+        </div>
+      )}
+
+      {produced && (
+        <div className="flex shrink-0 items-center gap-1 border-t border-current/10 px-2 py-1">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-5 gap-1 px-1 text-[10px] text-current opacity-60 hover:bg-transparent hover:opacity-100"
+            onClick={() => onRestoreNote(node.id)}
+            title="清空产出，回到手写内容"
+          >
+            <RotateCcw className="size-2.5" />
+            退回手写内容
+          </Button>
+        </div>
+      )}
 
       {showHistory && runs.length > 0 && (
         <HistoryList
@@ -914,6 +1047,21 @@ function NoteNode({ data, selected }: NodeProps<Node<BoardNodeData>>) {
         />
       )}
     </div>
+  )
+}
+
+/**
+ * 落点层：拖线过程中覆盖整个节点，让"松手落在节点任意位置"都能接上。
+ * 非拉线状态下 pointer-events: none，不影响节点的选择与拖动。
+ */
+function ConnectingSurface() {
+  return (
+    <Handle
+      id="t-surface"
+      type="target"
+      position={Position.Top}
+      className="board-handle board-handle-surface"
+    />
   )
 }
 
