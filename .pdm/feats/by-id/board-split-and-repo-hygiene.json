@@ -2,7 +2,7 @@
   "slug": "board-split-and-repo-hygiene",
   "title": "画板组件拆分、首屏按需加载与仓库删减字体源码包",
   "kind": "refactor",
-  "status": "draft",
+  "status": "closed",
   "doc": "doc/feat/board-split-and-repo-hygiene.md",
   "api": [],
   "logs": [],
@@ -28,14 +28,15 @@
     "53472b7ee877f6432ca88e31f413480845bc0231",
     "86540ecbfbe3a44733f744378b1f99bc5e7250e6",
     "7bb9cc641e76b56e71ba99be26d715869e556a69",
-    "04da04cadf01d68fa7d29fadb60d399a56feb37a"
+    "04da04cadf01d68fa7d29fadb60d399a56feb37a",
+    "3ec2e4070eb9e8bf0bbd981c8e0e68150c8c32d3"
   ],
   "notes": [],
   "discovered": [],
-  "stage": "fix",
+  "stage": "close",
   "reviews": {},
   "comments": {},
   "stage_reviews": {},
   "created_at": "2026-11-11T13:58:56.345094+00:00",
-  "updated_at": "2026-11-11T14:00:27.810011+00:00"
+  "updated_at": "2026-11-11T14:02:17.958176+00:00"
 }
