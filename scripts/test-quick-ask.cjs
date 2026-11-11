@@ -348,6 +348,48 @@ function historyAutoCase() {
   })
 }
 
+/** 滚动条跟随主题 */
+function scrollbarThemeCase() {
+  return run(async (t) => {
+    await t.seed()
+    await t.page.evaluate(() => {
+      const s = JSON.parse(localStorage.getItem("shadcn-chat/state/v1"))
+      s.conversations[0].messages = Array.from({ length: 30 }, (_, i) => ({
+        id: "x" + i,
+        role: i % 2 ? "assistant" : "user",
+        content: "第 " + i + " 条测试消息，用于撑出滚动条。",
+        createdAt: Date.now(),
+      }))
+      localStorage.setItem("shadcn-chat/state/v1", JSON.stringify(s))
+      localStorage.setItem("shadcn-chat/theme", "dark")
+    })
+    await t.page.reload({ waitUntil: "domcontentloaded" })
+    await t.page.waitForTimeout(500)
+
+    const dark = await t.page.evaluate(() => {
+      const el = document.querySelector("main .overflow-y-auto")
+      const root = getComputedStyle(document.documentElement)
+      return {
+        color: getComputedStyle(el).scrollbarColor,
+        border: root.getPropertyValue("--border").trim(),
+      }
+    })
+    t.ok(
+      dark.color.includes(dark.border.split(" ")[0]) ||
+        dark.color !== "auto",
+      "暗色滚动条使用主题色"
+    )
+
+    await t.page.evaluate(() => localStorage.setItem("shadcn-chat/theme", "light"))
+    await t.page.reload({ waitUntil: "domcontentloaded" })
+    await t.page.waitForTimeout(400)
+    const light = await t.page.evaluate(
+      () => getComputedStyle(document.querySelector("main .overflow-y-auto")).scrollbarColor
+    )
+    t.ok(light !== dark.color, "亮/暗滚动条颜色不同")
+  })
+}
+
 if (require.main === module) {
   const cases = {
     main: mainCase,
@@ -357,6 +399,7 @@ if (require.main === module) {
     switcher: switcherCase,
     history: historyPerConversationCase,
     historyauto: historyAutoCase,
+    scrollbar: scrollbarThemeCase,
   }
   const pick = process.env.CASE || "main"
   const fn = cases[pick]

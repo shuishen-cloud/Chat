@@ -171,3 +171,33 @@
 
   .prose-chat img { margin-block: 0.8rem; border-radius: 0.5rem; max-width: 100%; }
 }
+
+/* ---------------- 原生滚动条：跟随主题，避免暗色下仍是白色 ---------------- */
+@layer base {
+  /* Firefox / 新 Chromium 标准属性 */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+
+  /* WebKit 系（Chrome / Safari / Edge） */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    border-radius: 9999px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+    background-color: var(--border);
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: var(--muted-foreground);
+  }
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+}
