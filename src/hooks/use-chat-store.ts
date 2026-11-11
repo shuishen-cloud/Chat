@@ -571,7 +571,10 @@ export function useChatStore() {
       let created: Conversation | null = null
 
       if (!targetConvId) {
-        if (!targetProjectId) return
+        if (!targetProjectId) {
+          toast.error("还没有项目，请先在左侧新建一个项目")
+          return
+        }
         created = createConversation(targetProjectId)
         targetConvId = created.id
       }
@@ -708,6 +711,9 @@ export function useChatStore() {
       state.apiKey,
       state.baseUrl,
       state.model,
+      state.activeConversationId,
+      state.activeProjectId,
+      state.conversations,
       streamingConvId,
       updateMessages,
     ]

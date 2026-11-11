@@ -468,6 +468,44 @@ function historyNoDeleteCase() {
   })
 }
 
+/** 全新用户首屏直接提问：不得新建对话、不得写入旧会话 */
+function freshSendCase() {
+  return run(async (t) => {
+    await t.mockReply("**收到**。")
+    // 完全空白起步
+    await t.page.goto("http://127.0.0.1:5199/", { waitUntil: "domcontentloaded" })
+    await t.page.evaluate(() => localStorage.clear())
+    await t.page.reload({ waitUntil: "domcontentloaded" })
+    await t.page.waitForTimeout(600)
+    // 补一个 Key 以跳过未配置提示
+    await t.page.evaluate(() => {
+      const s = JSON.parse(localStorage.getItem("shadcn-chat/state/v1"))
+      s.apiKey = "sk-test"
+      localStorage.setItem("shadcn-chat/state/v1", JSON.stringify(s))
+    })
+    await t.page.reload({ waitUntil: "domcontentloaded" })
+    await t.page.waitForTimeout(600)
+
+    const before = await t.state()
+    const convId = before.activeConversationId
+    t.ok(convId, "首屏已自动建立对话")
+
+    for (const msg of ["第一条", "第二条"]) {
+      const ta = t.page.locator("main textarea").last()
+      await ta.fill(msg)
+      await ta.press("Enter")
+      await t.page.waitForTimeout(800)
+    }
+
+    const st = await t.state()
+    t.eq(st.conversations.length, before.conversations.length, "未额外新建对话")
+    t.eq(st.activeConversationId, convId, "仍停留在当前对话")
+    const conv = st.conversations.find((c) => c.id === convId)
+    t.eq(conv.messages.length, 4, "两条问答都写入当前对话")
+    t.ok(conv.title !== "新对话", "标题已按首条消息更新")
+  })
+}
+
 if (require.main === module) {
   const cases = {
     main: mainCase,
@@ -480,6 +518,7 @@ if (require.main === module) {
     scrollbar: scrollbarThemeCase,
     favoritejump: favoriteJumpCase,
     historynodelete: historyNoDeleteCase,
+    freshsend: freshSendCase,
   }
   const pick = process.env.CASE || "main"
   const fn = cases[pick]
