@@ -184,7 +184,7 @@ function asConversationCase() {
     await t.page.waitForTimeout(600)
 
     // 历史面板
-    await t.page.locator("button[title='提示词历史']").click()
+    await t.page.locator("button[title^='「'], button[title='提示词历史']").first().click()
     await t.page.waitForTimeout(400)
     const panel = t.page.locator("[data-aux-panel='prompt-history']")
     const text = await panel.innerText()
@@ -240,6 +240,59 @@ function switcherCase() {
   })
 }
 
+/** 提示词历史按对话隔离 */
+function historyPerConversationCase() {
+  return run(async (t) => {
+    await t.mockReply("**回答**。")
+    await t.seed({
+      projects: [{ id: "p1", name: "前端", createdAt: 1 }],
+      conversations: [
+        { id: "c1", projectId: "p1", title: "对话一", createdAt: 1, updatedAt: 3,
+          messages: [{ id: "a1", role: "assistant", content: "对话一的内容段落。", createdAt: 1 }] },
+        { id: "c2", projectId: "p1", title: "对话二", createdAt: 1, updatedAt: 2,
+          messages: [{ id: "b1", role: "assistant", content: "对话二的内容段落。", createdAt: 1 }] },
+      ],
+      favorites: [], tags: [], activeProjectId: "p1", activeConversationId: "c1",
+      apiKey: "sk-t", baseUrl: "https://api.deepseek.com",
+      model: "deepseek-v4-pro", sidebarView: "list",
+    })
+
+    const ask = async (text) => {
+      const ta = t.page.locator("main textarea").last()
+      await ta.fill(text)
+      await ta.press("Enter")
+      await t.page.waitForTimeout(600)
+    }
+    const openPanel = async () => {
+      await t.page.locator("button[title^='「'], button[title='提示词历史']").first().click()
+      await t.page.waitForTimeout(300)
+      return t.page.locator("[data-aux-panel='prompt-history']")
+    }
+
+    await ask("对话一的问题")
+    let panel = await openPanel()
+    t.ok((await panel.innerText()).includes("对话一的问题"), "对话一有自己的历史")
+    await t.page.keyboard.press("Escape")
+    await t.page.waitForTimeout(200)
+
+    await t.page.evaluate(() => {
+      const s = JSON.parse(localStorage.getItem("shadcn-chat/state/v1"))
+      s.activeConversationId = "c2"
+      localStorage.setItem("shadcn-chat/state/v1", JSON.stringify(s))
+    })
+    await t.page.reload({ waitUntil: "domcontentloaded" })
+    await t.page.waitForTimeout(400)
+
+    panel = await openPanel()
+    t.ok(!(await panel.innerText()).includes("对话一的问题"), "对话二看不到对话一的历史")
+
+    const stored = await t.page.evaluate(() =>
+      JSON.parse(localStorage.getItem("shadcn-chat/prompt-history/v2"))
+    )
+    t.eq(stored.c1?.length, 1, "按对话分别存储")
+  })
+}
+
 if (require.main === module) {
   const cases = {
     main: mainCase,
@@ -247,6 +300,7 @@ if (require.main === module) {
     favorites: regressionFavoritesPanel,
     asconversation: asConversationCase,
     switcher: switcherCase,
+    history: historyPerConversationCase,
   }
   const pick = process.env.CASE || "main"
   const fn = cases[pick]

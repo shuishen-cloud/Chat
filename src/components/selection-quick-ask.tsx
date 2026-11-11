@@ -234,7 +234,8 @@ export function SelectionQuickAsk({
     if (!question.trim() || phase === "asking") return
 
     const q = question.trim()
-    history.record(q, "quickask")
+    // 记到浮窗所引用的对话上，而非当前浏览的对话
+    history.record(ctx.conversationId, q, "quickask")
     setAskedQuestion(q)
     setQuestion("")
     setPhase("asking")

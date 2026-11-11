@@ -190,6 +190,7 @@ export function ChatMain({ store, onOpenSettings, history, draft, onDraftConsume
             onOpenSettings={onOpenSettings}
             draft={draft}
             onDraftConsumed={onDraftConsumed}
+            activeConversationId={activeConversation?.id ?? null}
             history={history}
           />
           <div className="mt-2 text-center text-[11px] text-muted-foreground">
@@ -489,6 +490,7 @@ function Composer({
   onOpenSettings,
   draft,
   onDraftConsumed,
+  activeConversationId,
   history,
 }: {
   isStreaming: boolean
@@ -498,6 +500,7 @@ function Composer({
   onOpenSettings: () => void
   draft: string
   onDraftConsumed: () => void
+  activeConversationId: string | null
   history: import("@/components/prompt-history").PromptHistoryApi
 }) {
   const [value, setValue] = useState("")
@@ -521,7 +524,7 @@ function Composer({
 
   function submit() {
     if (!value.trim() || isStreaming) return
-    history.record(value, "chat")
+    history.record(activeConversationId, value, "chat")
     onSend(value)
     setValue("")
   }

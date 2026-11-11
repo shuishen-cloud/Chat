@@ -15,67 +15,114 @@ export interface PromptHistoryItem {
   source: "chat" | "quickask"
 }
 
-const STORAGE_KEY = "shadcn-chat/prompt-history/v1"
-const MAX_ITEMS = 200
+/** 按对话分组的历史：conversationId -> 该对话的提问列表 */
+type HistoryMap = Record<string, PromptHistoryItem[]>
 
-function load(): PromptHistoryItem[] {
+const STORAGE_KEY = "shadcn-chat/prompt-history/v2"
+/** 旧版全局历史键，改为按对话隔离后不再使用，启动时清理 */
+const LEGACY_KEY = "shadcn-chat/prompt-history/v1"
+const MAX_PER_CONVERSATION = 100
+
+function load(): HistoryMap {
   try {
+    // 清理旧版全局历史（无法可靠映射到具体对话）
+    localStorage.removeItem(LEGACY_KEY)
     const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) return []
-    const arr = JSON.parse(raw)
-    return Array.isArray(arr) ? arr : []
+    if (!raw) return {}
+    const data = JSON.parse(raw)
+    if (!data || typeof data !== "object" || Array.isArray(data)) return {}
+    const out: HistoryMap = {}
+    for (const [k, v] of Object.entries(data)) {
+      if (Array.isArray(v)) out[k] = v.filter((i) => i && typeof i.text === "string")
+    }
+    return out
   } catch {
-    return []
+    return {}
   }
 }
 
-function save(items: PromptHistoryItem[]) {
+function save(map: HistoryMap) {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(items.slice(0, MAX_ITEMS)))
+    const trimmed: HistoryMap = {}
+    for (const [k, v] of Object.entries(map)) {
+      if (v.length) trimmed[k] = v.slice(0, MAX_PER_CONVERSATION)
+    }
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(trimmed))
   } catch {
     /* 忽略 */
   }
 }
 
 /**
- * 提示词历史：记录用过的提问，支持搜索、复制、复用、删除。
+ * 提示词历史：按对话隔离，每个对话维护自己的提问记录。
  * 存储独立于 ChatState，避免污染主状态。
  */
 export function usePromptHistory() {
-  const [items, setItems] = useState<PromptHistoryItem[]>(() => load())
+  const [map, setMap] = useState<HistoryMap>(() => load())
   const saveTimer = useRef<number | null>(null)
 
   useEffect(() => {
     if (saveTimer.current) window.clearTimeout(saveTimer.current)
-    saveTimer.current = window.setTimeout(() => save(items), 300)
+    saveTimer.current = window.setTimeout(() => save(map), 300)
     return () => {
       if (saveTimer.current) window.clearTimeout(saveTimer.current)
     }
-  }, [items])
+  }, [map])
 
-  /** 记录一次提问（相同文本则置顶刷新） */
+  /** 记录一次提问到指定对话（相同文本置顶刷新） */
   const record = useCallback(
-    (text: string, source: PromptHistoryItem["source"] = "chat") => {
+    (
+      conversationId: string | null,
+      text: string,
+      source: PromptHistoryItem["source"] = "chat"
+    ) => {
       const trimmed = text.trim()
-      if (!trimmed || trimmed.length > 2000) return
-      setItems((prev) => {
-        const rest = prev.filter((i) => i.text !== trimmed)
-        return [
-          { id: `ph_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`, text: trimmed, usedAt: Date.now(), source },
-          ...rest,
-        ].slice(0, MAX_ITEMS)
+      if (!conversationId || !trimmed || trimmed.length > 2000) return
+      setMap((prev) => {
+        const list = prev[conversationId] ?? []
+        const rest = list.filter((i) => i.text !== trimmed)
+        return {
+          ...prev,
+          [conversationId]: [
+            {
+              id: `ph_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+              text: trimmed,
+              usedAt: Date.now(),
+              source,
+            },
+            ...rest,
+          ].slice(0, MAX_PER_CONVERSATION),
+        }
       })
     },
     []
   )
 
-  const remove = useCallback((id: string) => {
-    setItems((prev) => prev.filter((i) => i.id !== id))
+  const remove = useCallback((conversationId: string, id: string) => {
+    setMap((prev) => ({
+      ...prev,
+      [conversationId]: (prev[conversationId] ?? []).filter((i) => i.id !== id),
+    }))
   }, [])
 
-  const clear = useCallback(() => setItems([]), [])
+  const clear = useCallback((conversationId: string) => {
+    setMap((prev) => ({ ...prev, [conversationId]: [] }))
+  }, [])
 
-  return { items, record, remove, clear }
+  /** 某个对话的历史 */
+  const getItems = useCallback(
+    (conversationId: string | null) =>
+      conversationId ? (map[conversationId] ?? []) : [],
+    [map]
+  )
+
+  /** 全部对话的历史条数合计 */
+  const totalCount = useMemo(
+    () => Object.values(map).reduce((n, v) => n + v.length, 0),
+    [map]
+  )
+
+  return { map, record, remove, clear, getItems, totalCount }
 }
 
 export type PromptHistoryApi = ReturnType<typeof usePromptHistory>
@@ -84,6 +131,10 @@ interface PanelProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   history: PromptHistoryApi
+  /** 当前对话 id，历史按对话隔离 */
+  conversationId: string | null
+  /** 当前对话标题，用于面板副标题 */
+  conversationTitle: string | null
   /** 点击历史项时填入输入框 */
   onPick: (text: string) => void
 }
@@ -91,9 +142,17 @@ interface PanelProps {
 /**
  * 右侧悬浮的提示词历史：收起时是一个贴边按钮，展开为侧栏。
  */
-export function PromptHistoryPanel({ open, onOpenChange, history, onPick }: PanelProps) {
+export function PromptHistoryPanel({
+  open,
+  onOpenChange,
+  history,
+  conversationId,
+  conversationTitle,
+  onPick,
+}: PanelProps) {
   const [query, setQuery] = useState("")
-  const { items, remove, clear } = history
+  const { remove, clear, getItems } = history
+  const items = getItems(conversationId)
 
   useEffect(() => {
     if (!open) return
@@ -130,7 +189,7 @@ export function PromptHistoryPanel({ open, onOpenChange, history, onPick }: Pane
         <button
           type="button"
           onClick={() => onOpenChange(true)}
-          title="提示词历史"
+          title={conversationTitle ? `「${conversationTitle}」的提示词历史` : "提示词历史"}
           className="fixed top-1/2 right-0 z-40 flex -translate-y-1/2 items-center gap-1 rounded-l-lg border border-r-0 border-border bg-popover py-2 pr-1 pl-1.5 text-[11px] text-muted-foreground shadow-sm transition-colors hover:bg-accent hover:text-foreground"
         >
           <Clock className="size-3.5" />
@@ -154,7 +213,12 @@ export function PromptHistoryPanel({ open, onOpenChange, history, onPick }: Pane
       >
         <div className="flex shrink-0 items-center gap-2 border-b border-border p-3">
           <Clock className="size-4 shrink-0 text-muted-foreground" />
-          <div className="flex-1 text-sm font-medium">提示词历史</div>
+          <div className="min-w-0 flex-1">
+            <div className="text-sm font-medium">提示词历史</div>
+            <div className="truncate text-[11px] text-muted-foreground">
+              {conversationTitle ?? "未选择对话"}
+            </div>
+          </div>
           <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground tabular-nums">
             {items.length}
           </span>
@@ -162,10 +226,12 @@ export function PromptHistoryPanel({ open, onOpenChange, history, onPick }: Pane
             size="icon"
             variant="ghost"
             className="size-6"
-            title="清空历史"
+            title="清空本对话历史"
+            disabled={!conversationId || items.length === 0}
             onClick={() => {
-              clear()
-              toast.success("已清空历史")
+              if (!conversationId) return
+              clear(conversationId)
+              toast.success("已清空本对话历史")
             }}
           >
             <Trash2 className="size-3.5" />
@@ -195,10 +261,12 @@ export function PromptHistoryPanel({ open, onOpenChange, history, onPick }: Pane
         <ScrollArea className="min-h-0 flex-1">
           <div className="p-2">
             {filtered.length === 0 ? (
-              <div className="px-3 py-12 text-center text-xs leading-relaxed text-muted-foreground">
-                {items.length === 0
-                  ? "还没有历史记录\n发出的提问会自动记在这里"
-                  : "没有匹配的提示词"}
+              <div className="px-3 py-12 text-center text-xs leading-relaxed whitespace-pre-line text-muted-foreground">
+                {!conversationId
+                  ? "请先选择一个对话"
+                  : items.length === 0
+                    ? "本对话还没有历史记录\n发出的提问会自动记在这里"
+                    : "没有匹配的提示词"}
               </div>
             ) : (
               <div className="flex flex-col gap-1">
@@ -235,7 +303,7 @@ export function PromptHistoryPanel({ open, onOpenChange, history, onPick }: Pane
                       </button>
                       <button
                         type="button"
-                        onClick={() => remove(item.id)}
+                        onClick={() => conversationId && remove(conversationId, item.id)}
                         className="opacity-0 transition-opacity group-hover/ph:opacity-100 hover:text-destructive"
                         title="删除"
                       >

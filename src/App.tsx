@@ -128,6 +128,8 @@ export default function App() {
           open={historyOpen}
           onOpenChange={setHistoryOpen}
           history={history}
+          conversationId={store.state.activeConversationId}
+          conversationTitle={store.activeConversation?.title ?? null}
           onPick={(text) => setDraft(text)}
         />
         <Toaster position="top-center" richColors />
