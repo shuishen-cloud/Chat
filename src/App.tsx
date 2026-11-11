@@ -44,9 +44,15 @@ export default function App() {
           <ChatSidebar
             store={store}
             onOpenSettings={() => setSettingsOpen(true)}
-            onOpenFavorites={() => setFavoritesOpen(true)}
+            onOpenFavorites={() => setFavoritesOpen((v) => !v)}
           />
         </div>
+
+        <FavoritesPanel
+          open={favoritesOpen}
+          onOpenChange={setFavoritesOpen}
+          store={store}
+        />
 
         <div className="flex min-w-0 flex-1 flex-col">
           <div className="flex h-11 shrink-0 items-center gap-1 border-b border-border px-2">
@@ -94,11 +100,6 @@ export default function App() {
         <SettingsDialog
           open={settingsOpen}
           onOpenChange={setSettingsOpen}
-          store={store}
-        />
-        <FavoritesPanel
-          open={favoritesOpen}
-          onOpenChange={setFavoritesOpen}
           store={store}
         />
         <Toaster position="top-center" richColors />

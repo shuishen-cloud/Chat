@@ -265,46 +265,46 @@ function MessageBubble({
 
   if (isUser) {
     return (
-      <div className="flex justify-end">
-        <div className="group/msg max-w-[85%]">
+      <div className="group/msg flex flex-col items-end">
+        <div className="max-w-[85%]">
           <div className="rounded-2xl rounded-br-md bg-secondary px-4 py-2.5 text-sm whitespace-pre-wrap break-words text-secondary-foreground">
             {message.content}
           </div>
-          <div className="mt-1 flex justify-end gap-1 opacity-0 transition-opacity group-hover/msg:opacity-100 has-[.fav-on]:opacity-100">
-            <Button
-              variant="ghost"
-              size="sm"
-              className={cn(
-                "h-7 gap-1.5 px-2 text-xs",
-                message.favorite
-                  ? "fav-on text-amber-500 hover:text-amber-500"
-                  : "text-muted-foreground"
-              )}
-              onClick={onToggleFavorite}
-              title={message.favorite ? "取消收藏" : "收藏此消息"}
-            >
-              <Star className={cn("size-3", message.favorite && "fill-current")} />
-              {message.favorite ? "已收藏" : "收藏"}
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-7 gap-1.5 px-2 text-xs text-muted-foreground"
-              onClick={onBranch}
-            >
-              <GitBranch className="size-3" />
-              从这里分支
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-7 gap-1.5 px-2 text-xs text-muted-foreground"
-              onClick={copy}
-            >
-              <Copy className="size-3" />
-              复制
-            </Button>
-          </div>
+        </div>
+        <div className="mt-1 flex justify-end gap-0.5 opacity-40 transition-opacity group-hover/msg:opacity-100 focus-within:opacity-100 has-[.fav-on]:opacity-100">
+          <Button
+            variant="ghost"
+            size="sm"
+            className={cn(
+              "h-6 gap-1 px-1.5 text-[11px]",
+              message.favorite
+                ? "fav-on text-amber-500 hover:text-amber-500"
+                : "text-muted-foreground hover:text-foreground"
+            )}
+            onClick={onToggleFavorite}
+            title={message.favorite ? "取消收藏" : "收藏此消息"}
+          >
+            <Star className={cn("size-3", message.favorite && "fill-current")} />
+            {message.favorite ? "已收藏" : "收藏"}
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-6 gap-1 px-1.5 text-[11px] text-muted-foreground hover:text-foreground"
+            onClick={onBranch}
+          >
+            <GitBranch className="size-3" />
+            分支
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-6 gap-1 px-1.5 text-[11px] text-muted-foreground hover:text-foreground"
+            onClick={copy}
+          >
+            <Copy className="size-3" />
+            复制
+          </Button>
         </div>
       </div>
     )
@@ -350,14 +350,29 @@ function MessageBubble({
         {!message.streaming && message.content && (
           <div
             className={cn(
-              "mt-2 flex items-center gap-1 opacity-0 transition-opacity group-hover/msg:opacity-100",
-              isLast && "opacity-100"
+              "mt-2 flex flex-wrap items-center gap-0.5 transition-opacity focus-within:opacity-100 has-[.fav-on]:opacity-100 group-hover/msg:opacity-100",
+              isLast ? "opacity-70" : "opacity-40"
             )}
           >
             <Button
               variant="ghost"
               size="sm"
-              className="h-7 gap-1.5 px-2 text-xs text-muted-foreground"
+              className={cn(
+                "h-6 gap-1 px-1.5 text-[11px]",
+                message.favorite
+                  ? "fav-on text-amber-500 hover:text-amber-500"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+              onClick={onToggleFavorite}
+              title={message.favorite ? "取消收藏" : "收藏此消息"}
+            >
+              <Star className={cn("size-3", message.favorite && "fill-current")} />
+              {message.favorite ? "已收藏" : "收藏"}
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 gap-1 px-1.5 text-[11px] text-muted-foreground hover:text-foreground"
               onClick={copy}
             >
               <Copy className="size-3" />
@@ -367,7 +382,7 @@ function MessageBubble({
               <Button
                 variant="ghost"
                 size="sm"
-                className="h-7 gap-1.5 px-2 text-xs text-muted-foreground"
+                className="h-6 gap-1 px-1.5 text-[11px] text-muted-foreground hover:text-foreground"
                 onClick={onRegenerate}
               >
                 <RefreshCw className="size-3" />
@@ -378,12 +393,12 @@ function MessageBubble({
               <Button
                 variant="ghost"
                 size="sm"
-                className="h-7 gap-1.5 px-2 text-xs text-muted-foreground"
+                className="h-6 gap-1 px-1.5 text-[11px] text-muted-foreground hover:text-foreground"
                 onClick={onBranch}
                 title="从此处另开一个对话，包含到这里的全部历史"
               >
                 <GitBranch className="size-3" />
-                从这里分支
+                分支
               </Button>
             )}
           </div>
@@ -481,7 +496,7 @@ function Composer({
           variant="ghost"
           size="sm"
           onClick={onOpenSettings}
-          className="h-7 gap-1.5 px-2 text-xs text-muted-foreground"
+          className="h-6 gap-1 px-1.5 text-[11px] text-muted-foreground hover:text-foreground"
           title="模型设置"
         >
           {modelLabel}
