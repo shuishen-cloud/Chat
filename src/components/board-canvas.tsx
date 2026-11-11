@@ -437,7 +437,12 @@ function InnerFlow({
   const editingEdge = edges.find((e) => e.id === editingEdgeId) ?? null
 
   return (
-    <div className={cn("relative h-full w-full", connecting && "board-connecting")}>
+    <div
+      className={cn(
+        "relative h-full w-full",
+        connecting && "board-connecting cursor-crosshair"
+      )}
+    >
       <ReactFlow
         nodes={displayNodes}
         edges={flowEdges}
