@@ -63,6 +63,9 @@ export function useChatStore() {
   const [state, setState] = useState<ChatState>(() => loadState())
   /** 供内部触发「打开设置」对话框 */
   const openSettingsRef = useRef<(() => void) | null>(null)
+  /** 始终指向最新 state：异步循环里避免读到过期闭包 */
+  const stateRef = useRef(state)
+  stateRef.current = state
   const abortRef = useRef<AbortController | null>(null)
   const [streamingConvId, setStreamingConvId] = useState<string | null>(null)
 
@@ -1397,18 +1400,7 @@ export function useChatStore() {
 
   /** 解析节点的可读文本：改写优先，其次摘录，最后源消息 */
   const nodeText = useCallback(
-    (node: BoardNode): string => {
-      if (node.contentOverride !== undefined && node.contentOverride !== "") {
-        return node.contentOverride
-      }
-      if (node.excerpt) return node.excerpt
-      if (node.kind === "note") return node.note ?? ""
-      const conv = state.conversations.find(
-        (c) => c.id === node.ref?.conversationId
-      )
-      const msg = conv?.messages.find((m) => m.id === node.ref?.messageId)
-      return msg?.content ?? ""
-    },
+    (node: BoardNode): string => resolveNodeText(node, state.conversations),
     [state.conversations]
   )
 
@@ -1446,19 +1438,29 @@ export function useChatStore() {
       const controller = new AbortController()
       abortRef.current = controller
 
+      /**
+       * 本次运行中已经向哪个节点写过结果。
+       * 多条线指向同一终点时（材料汇聚对比），结果要按顺序拼接而不是互相覆盖，
+       * 否则前一条线的产出会被后一条直接吃掉。
+       */
+      const writtenTargets = new Set<string>()
+
       let ok = 0
       let failed = 0
+      let aborted = false
 
       try {
         for (const edge of runnable) {
-          const source = state.boardNodes.find((n) => n.id === edge.from)
-          const target = state.boardNodes.find((n) => n.id === edge.to)
+          // 从最新 state 取节点：前一条线可能刚改写了某个节点
+          const latest = stateRef.current
+          const source = latest.boardNodes.find((n) => n.id === edge.from)
+          const target = latest.boardNodes.find((n) => n.id === edge.to)
           if (!source || !target) {
             failed++
             continue
           }
 
-          const inputText = nodeText(source)
+          const inputText = resolveNodeText(source, latest.conversations)
           if (!inputText.trim()) {
             failed++
             continue
@@ -1498,23 +1500,32 @@ export function useChatStore() {
               ...snapshot,
               output: result.content,
             }
+            const isFirstWrite = !writtenTargets.has(target.id)
+            writtenTargets.add(target.id)
             setState((prev) => ({
               ...prev,
               boardNodes: prev.boardNodes.map((n) => {
                 if (n.id !== target.id) return n
-                // 结果覆盖节点内容，同时保留历史
                 const prevRuns = n.runs ?? []
+                // 同一节点被多条线写入时，用分隔标记拼接，保留各自产出
+                const nextContent = isFirstWrite
+                  ? result.content
+                  : `${n.contentOverride ?? ""}\n\n---\n\n${
+                      prompt ? `**${prompt}**\n\n` : ""
+                    }${result.content}`
                 return {
                   ...n,
-                  contentOverride: result.content,
+                  contentOverride: nextContent,
                   runs: [run, ...prevRuns].slice(0, 50),
                 }
               }),
             }))
             ok++
           } catch (err) {
-            const aborted = (err as Error)?.name === "AbortError"
-            if (aborted) break
+            if ((err as Error)?.name === "AbortError") {
+              aborted = true
+              break
+            }
             failed++
             const message = err instanceof Error ? err.message : String(err)
             setState((prev) => ({
@@ -1537,7 +1548,9 @@ export function useChatStore() {
         setRunningTaskId(null)
       }
 
-      if (ok > 0 && failed === 0) {
+      if (aborted) {
+        toast.info(`已停止，完成了 ${ok} 条线`)
+      } else if (ok > 0 && failed === 0) {
         toast.success(`已执行 ${ok} 条线`)
       } else if (ok > 0) {
         toast.warning(`成功 ${ok} 条，失败 ${failed} 条`)
@@ -1719,4 +1732,24 @@ function scrollMessageIntoView(messageId: string, timeout = 1500) {
     }
   }
   requestAnimationFrame(tick)
+}
+
+/**
+ * 解析节点当前可读文本：改写优先 → 摘录 → 便签 → 源消息。
+ *
+ * 抽成纯函数是为了在执行循环里用「最新 state」计算，
+ * 避免连续执行多条线时读到闭包里的旧内容。
+ */
+export function resolveNodeText(
+  node: BoardNode,
+  conversations: Conversation[]
+): string {
+  if (node.contentOverride !== undefined && node.contentOverride !== "") {
+    return node.contentOverride
+  }
+  if (node.excerpt) return node.excerpt
+  if (node.kind === "note") return node.note ?? ""
+  const conv = conversations.find((c) => c.id === node.ref?.conversationId)
+  const msg = conv?.messages.find((m) => m.id === node.ref?.messageId)
+  return msg?.content ?? ""
 }

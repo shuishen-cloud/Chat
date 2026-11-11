@@ -630,8 +630,8 @@ cases.editEdgePrompt = async (t) => {
   await t.seed(seedFlow())
   await t.untilVisible(".react-flow__edge")
 
-  // 双击边打开编辑器
-  await t.page.locator(".react-flow__edge").first().dblclick({ force: true })
+  // 单击边打开编辑器（点 path 而非 g，命中率更高）
+  await t.page.locator(".react-flow__edge-path").first().click({ force: true })
   const box = t.page.getByPlaceholder("这条线要做什么？")
   await box.waitFor({ state: "visible" })
   await box.fill("提炼成三点")
@@ -651,7 +651,7 @@ cases.toggleEdgeEnabled = async (t) => {
   await t.untilVisible(".react-flow__edge")
 
   // 通过边菜单禁用
-  await t.page.locator(".react-flow__edge").first().click({ force: true })
+  await t.page.locator(".react-flow__edge-path").first().click({ force: true })
   await t.page.waitForTimeout(200)
   await t.page.getByRole("button", { name: /禁用此线|启用此线/ }).first().click()
 
@@ -668,12 +668,12 @@ cases.taskCreateAndSelectEdges = async (t) => {
   await t.seed(seedFlow())
   await t.untilVisible(".react-flow__edge")
 
+  // 新建任务会自动进入选边模式（按钮此时显示「退出选边」）
   await t.page.getByRole("button", { name: "新建任务" }).click()
   await t.stateUntil((x) => x.boardTasks.length === 1, 3000, "任务已创建")
+  await t.page.getByRole("button", { name: "退出选边" }).waitFor({ state: "visible" })
 
-  // 进入选边模式并点线加入
-  await t.page.getByRole("button", { name: /选边/ }).click()
-  await t.page.locator(".react-flow__edge").first().click({ force: true })
+  await t.page.locator(".react-flow__edge-path").first().click({ force: true })
 
   const s = await t.stateUntil(
     (x) => x.boardTasks[0]?.edgeIds?.length === 1,
@@ -749,6 +749,61 @@ cases.restoreNodeContent = async (t) => {
     s.boardNodes.find((n) => n.id === "b").contentOverride === undefined,
     "contentOverride 已清空"
   )
+}
+
+/** 多条线指向同一终点时，结果拼接而非互相覆盖 */
+cases.multiEdgeConvergeKeepsAll = async (t) => {
+  const now = Date.now()
+  const base = seedFlow()
+  await t.seed({
+    ...base,
+    boardNodes: [
+      { id: "a", boardId: "b1", kind: "note", note: "材料A", x: 0, y: 0, createdAt: now },
+      { id: "b2", boardId: "b1", kind: "note", note: "材料B", x: 0, y: 300, createdAt: now },
+      { id: "d", boardId: "b1", kind: "note", note: "初始输出", x: 400, y: 150, createdAt: now },
+    ],
+    boardEdges: [
+      { id: "e1", boardId: "b1", from: "a", to: "d", kind: "flow", prompt: "处理A" },
+      { id: "e2", boardId: "b1", from: "b2", to: "d", kind: "flow", prompt: "处理B" },
+    ],
+    boardTasks: [
+      {
+        id: "t1",
+        boardId: "b1",
+        name: "汇聚",
+        edgeIds: ["e1", "e2"],
+        createdAt: now,
+        updatedAt: now,
+      },
+    ],
+    activeTaskId: "t1",
+    mainView: "board",
+  })
+
+  let n = 0
+  await t.page.unroute("**/chat/completions").catch(() => {})
+  await t.page.route("**/chat/completions", (route) => {
+    n++
+    route.fulfill({
+      status: 200,
+      headers: { "content-type": "text/event-stream" },
+      body: `data: ${JSON.stringify({ choices: [{ delta: { content: "输出" + n } }] })}\n\ndata: [DONE]\n\n`,
+    })
+  })
+
+  await t.page.getByRole("button", { name: /运行任务/ }).click()
+
+  const s = await t.stateUntil(
+    (x) => (x.boardNodes.find((b) => b.id === "d")?.runs?.length ?? 0) === 2,
+    8000,
+    "两条线都执行完成"
+  )
+  t.eq(n, 2, "发起了 2 次请求")
+  const d = s.boardNodes.find((b) => b.id === "d")
+  t.ok(d.contentOverride.includes("输出1"), "保留了第一条线的产出")
+  t.ok(d.contentOverride.includes("输出2"), "保留了第二条线的产出")
+  t.ok(d.contentOverride.includes("处理B"), "拼接处带了第二条线的提示词标识")
+  t.eq(d.runs.length, 2, "两条线各留一条历史")
 }
 
 runAll(cases)
