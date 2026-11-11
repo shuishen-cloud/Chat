@@ -48,6 +48,7 @@ export function ChatMain({ store, onOpenSettings }: Props) {
     regenerate,
     branchFrom,
     toggleFavorite,
+    favoriteOf,
     clearConversation,
     deleteConversation,
     exportMarkdown,
@@ -146,6 +147,10 @@ export function ChatMain({ store, onOpenSettings }: Props) {
                     branchFrom(activeConversation.id, m.id)
                     toast.success("已创建分支对话")
                   }}
+                  favorited={
+                    !!activeConversation &&
+                    !!favoriteOf(activeConversation.id, m.id)
+                  }
                   onToggleFavorite={() => {
                     if (!activeConversation) return
                     toggleFavorite(activeConversation.id, m.id)
@@ -243,6 +248,7 @@ function MessageBubble({
   canRegenerate,
   onRegenerate,
   onBranch,
+  favorited,
   onToggleFavorite,
 }: {
   message: Message
@@ -250,6 +256,7 @@ function MessageBubble({
   canRegenerate: boolean
   onRegenerate: () => void
   onBranch: () => void
+  favorited: boolean
   onToggleFavorite: () => void
 }) {
   const isUser = message.role === "user"
@@ -277,15 +284,15 @@ function MessageBubble({
             size="sm"
             className={cn(
               "h-6 gap-1 px-1.5 text-[11px]",
-              message.favorite
+              favorited
                 ? "fav-on text-amber-500 hover:text-amber-500"
                 : "text-muted-foreground hover:text-foreground"
             )}
             onClick={onToggleFavorite}
-            title={message.favorite ? "取消收藏" : "收藏此消息"}
+            title={favorited ? "取消收藏" : "收藏此消息"}
           >
-            <Star className={cn("size-3", message.favorite && "fill-current")} />
-            {message.favorite ? "已收藏" : "收藏"}
+            <Star className={cn("size-3", favorited && "fill-current")} />
+            {favorited ? "已收藏" : "收藏"}
           </Button>
           <Button
             variant="ghost"
@@ -317,7 +324,7 @@ function MessageBubble({
           DS
         </div>
         <span className="text-xs font-medium text-muted-foreground">DeepSeek</span>
-        {message.favorite && (
+        {favorited && (
           <Star className="size-3 fill-current text-amber-500" />
         )}
       </div>
@@ -359,15 +366,15 @@ function MessageBubble({
               size="sm"
               className={cn(
                 "h-6 gap-1 px-1.5 text-[11px]",
-                message.favorite
+                favorited
                   ? "fav-on text-amber-500 hover:text-amber-500"
                   : "text-muted-foreground hover:text-foreground"
               )}
               onClick={onToggleFavorite}
-              title={message.favorite ? "取消收藏" : "收藏此消息"}
+              title={favorited ? "取消收藏" : "收藏此消息"}
             >
-              <Star className={cn("size-3", message.favorite && "fill-current")} />
-              {message.favorite ? "已收藏" : "收藏"}
+              <Star className={cn("size-3", favorited && "fill-current")} />
+              {favorited ? "已收藏" : "收藏"}
             </Button>
             <Button
               variant="ghost"

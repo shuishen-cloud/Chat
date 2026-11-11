@@ -3,15 +3,28 @@ import { toast } from "sonner"
 import { streamChat } from "@/lib/deepseek"
 import { loadState, nextTitle, saveState } from "@/lib/storage"
 import {
+  TAG_HUES,
   createConversation,
+  createFavorite,
   createProject,
   newMessage,
   uid,
   type ChatState,
   type Conversation,
+  type Favorite,
   type Message,
   type Project,
+  type Tag,
 } from "@/lib/types"
+
+/** 收藏项 + 解析后的关联对象 */
+export interface FavoriteEntry {
+  favorite: Favorite
+  message: Message
+  conversation: Conversation
+  project: Project | undefined
+  tags: Tag[]
+}
 
 export function useChatStore() {
   const [state, setState] = useState<ChatState>(() => loadState())
@@ -70,28 +83,33 @@ export function useChatStore() {
     [projectConversations]
   )
 
-  /** 全部收藏消息（跟着会话走，已归档的也包含） */
+  /** 收藏项 + 关联的消息/对话/项目，保持扁平便于筛选 */
   const favorites = useMemo(() => {
-    const out: Array<{
-      message: Message
-      conversation: Conversation
-      project: Project | undefined
-    }> = []
-    for (const conv of state.conversations) {
-      for (const m of conv.messages) {
-        if (m.favorite) {
-          out.push({
-            message: m,
-            conversation: conv,
-            project: state.projects.find((p) => p.id === conv.projectId),
-          })
-        }
-      }
+    const out: FavoriteEntry[] = []
+    for (const fav of state.favorites) {
+      const conv = state.conversations.find((c) => c.id === fav.conversationId)
+      if (!conv) continue
+      const message = conv.messages.find((m) => m.id === fav.messageId)
+      if (!message) continue
+      out.push({
+        favorite: fav,
+        message,
+        conversation: conv,
+        project: state.projects.find((p) => p.id === conv.projectId),
+        tags: state.tags.filter((t) => fav.tagIds.includes(t.id)),
+      })
     }
-    return out.sort(
-      (a, b) => (b.message.favoritedAt ?? 0) - (a.message.favoritedAt ?? 0)
-    )
-  }, [state.conversations, state.projects])
+    return out.sort((a, b) => b.favorite.createdAt - a.favorite.createdAt)
+  }, [state.favorites, state.conversations, state.projects, state.tags])
+
+  /** 某条消息是否已被收藏 */
+  const favoriteOf = useCallback(
+    (convId: string, messageId: string) =>
+      state.favorites.find(
+        (f) => f.conversationId === convId && f.messageId === messageId
+      ),
+    [state.favorites]
+  )
 
   const activeConversation = useMemo(
     () =>
@@ -280,24 +298,122 @@ export function useChatStore() {
   /* ---------------- 收藏 ---------------- */
 
   const toggleFavorite = useCallback((convId: string, messageId: string) => {
+    setState((prev) => {
+      const existing = prev.favorites.find(
+        (f) => f.conversationId === convId && f.messageId === messageId
+      )
+      if (existing) {
+        return {
+          ...prev,
+          favorites: prev.favorites.filter((f) => f.id !== existing.id),
+        }
+      }
+      return {
+        ...prev,
+        favorites: [
+          ...prev.favorites,
+          createFavorite(convId, messageId),
+        ],
+      }
+    })
+  }, [])
+
+  /** 给收藏项设置标签 */
+  const setFavoriteTags = useCallback(
+    (favoriteId: string, tagIds: string[]) => {
+      setState((prev) => ({
+        ...prev,
+        favorites: prev.favorites.map((f) =>
+          f.id === favoriteId ? { ...f, tagIds } : f
+        ),
+      }))
+    },
+    []
+  )
+
+  /** 设置收藏备注 */
+  const setFavoriteNote = useCallback((favoriteId: string, note: string) => {
     setState((prev) => ({
       ...prev,
-      conversations: prev.conversations.map((c) =>
-        c.id === convId
-          ? {
-              ...c,
-              messages: c.messages.map((m) =>
-                m.id === messageId
-                  ? m.favorite
-                    ? { ...m, favorite: false, favoritedAt: undefined }
-                    : { ...m, favorite: true, favoritedAt: Date.now() }
-                  : m
-              ),
-            }
-          : c
+      favorites: prev.favorites.map((f) =>
+        f.id === favoriteId ? { ...f, note } : f
       ),
     }))
   }, [])
+
+  /** 批量取消收藏 */
+  const removeFavorites = useCallback((ids: string[]) => {
+    const set = new Set(ids)
+    setState((prev) => ({
+      ...prev,
+      favorites: prev.favorites.filter((f) => !set.has(f.id)),
+    }))
+  }, [])
+
+  /** 批量打标签 */
+  const tagFavorites = useCallback((ids: string[], tagId: string) => {
+    const set = new Set(ids)
+    setState((prev) => ({
+      ...prev,
+      favorites: prev.favorites.map((f) =>
+        set.has(f.id) && !f.tagIds.includes(tagId)
+          ? { ...f, tagIds: [...f.tagIds, tagId] }
+          : f
+      ),
+    }))
+  }, [])
+
+  /* ---------------- 标签 ---------------- */
+
+  const addTag = useCallback((name: string): string | null => {
+    const trimmed = name.trim()
+    if (!trimmed) return null
+    let newId: string | null = null
+    setState((prev) => {
+      if (prev.tags.some((t) => t.name === trimmed)) return prev
+      const id = uid("tag")
+      newId = id
+      return {
+        ...prev,
+        tags: [
+          ...prev.tags,
+          { id, name: trimmed, hue: TAG_HUES[prev.tags.length % TAG_HUES.length] },
+        ],
+      }
+    })
+    return newId
+  }, [])
+
+  const renameTag = useCallback((id: string, name: string) => {
+    const trimmed = name.trim()
+    if (!trimmed) return
+    setState((prev) => ({
+      ...prev,
+      tags: prev.tags.map((t) => (t.id === id ? { ...t, name: trimmed } : t)),
+    }))
+  }, [])
+
+  /** 删除标签，并从所有收藏项上摘除 */
+  const deleteTag = useCallback((id: string) => {
+    setState((prev) => ({
+      ...prev,
+      tags: prev.tags.filter((t) => t.id !== id),
+      favorites: prev.favorites.map((f) =>
+        f.tagIds.includes(id)
+          ? { ...f, tagIds: f.tagIds.filter((t) => t !== id) }
+          : f
+      ),
+    }))
+  }, [])
+
+  /** 标签使用计数 */
+  const tagCounts = useMemo(() => {
+    const map = new Map<string, number>()
+    for (const f of state.favorites) {
+      for (const t of f.tagIds) map.set(t, (map.get(t) ?? 0) + 1)
+    }
+    return map
+  }, [state.favorites])
 
   /* ---------------- 搜索 ---------------- */
 
@@ -593,6 +709,8 @@ export function useChatStore() {
     visibleConversations,
     archivedConversations,
     favorites,
+    tags: state.tags,
+    favoriteOf,
     activeConversation,
     streamingConvId,
     isStreaming: streamingConvId !== null,
@@ -611,6 +729,14 @@ export function useChatStore() {
     unarchiveAll,
     duplicateConversation,
     toggleFavorite,
+    setFavoriteTags,
+    setFavoriteNote,
+    removeFavorites,
+    tagFavorites,
+    addTag,
+    renameTag,
+    deleteTag,
+    tagCounts,
     searchConversations,
     updateSettings,
     send,
