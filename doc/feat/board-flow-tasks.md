@@ -131,4 +131,42 @@ messages = [
 
 ## 实现与校验结果
 
-（收尾阶段补充）
+### 落地情况
+
+| 设计点 | 实现位置 |
+|---|---|
+| edge 扩展（flow / prompt / enabled / handles） | `src/lib/types.ts::BoardEdge` |
+| node 扩展（contentOverride / runs） | `src/lib/types.ts::BoardNode`、`NodeRun` |
+| 任务实体 | `src/lib/types.ts::BoardTask`、`createBoardTask` |
+| 可执行判定 | `src/lib/types.ts::isRunnableEdge` |
+| 引用清理（含任务内失效边） | `src/lib/storage.ts::gcBoardRefs` |
+| 边编辑 / 任务 CRUD | `src/hooks/use-chat-store.ts::updateEdge` 等 |
+| 逐边执行 | `src/hooks/use-chat-store.ts::runTask` |
+| 四向手柄 + 连线徽章 + 边编辑器 | `src/components/board-canvas.tsx` |
+| 任务栏 | `src/components/board-panel.tsx` |
+
+### 与设计的偏差
+
+**多线汇聚改为拼接，而非覆盖。** 设计文档原写「结果覆盖内容」，实测发现
+多条线指向同一终点时（正是"多材料对比"的核心场景）后一条会吃掉前一条的产出。
+改为：本次运行内首次写入直接赋值，后续以 `---` 分隔拼接，并带上该线提示词作为小标题。
+
+**异步循环改用 `stateRef`。** `runTask` 的 `for` 循环若读 `useCallback` 闭包里的
+`state.boardNodes`，会拿到第一条线执行前的旧值。改为 `stateRef.current` +
+纯函数 `resolveNodeText`。
+
+### 校验
+
+- `scripts/test-board.cjs`：24 个用例全部通过，其中本 feat 新增 8 个：
+  `flowEdgeDefaults`、`editEdgePrompt`、`toggleEdgeEnabled`、
+  `taskCreateAndSelectEdges`、`runTaskWritesHistory`、`editNodeContent`、
+  `restoreNodeContent`、`multiEdgeConvergeKeepsAll`
+- `scripts/test-quick-ask.cjs`：11 个用例通过（无回归）
+- `npm run build` 通过
+
+### 已知限制
+
+- 同一节点被多条线写入时，内容会累积拼接；若只想看某条线的产出，
+  可在节点历史里查看单条记录，或用「回填」覆盖。
+- 每个节点历史保留最近 50 条。
+- 未做并发执行：线按任务内的顺序串行请求，避免触发速率限制。
