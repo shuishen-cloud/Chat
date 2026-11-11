@@ -154,11 +154,46 @@ function regressionFavoritesPanel() {
   })
 }
 
+/** 展开为大对话 / 返回浮窗 */
+function expandCase() {
+  return run(async (t) => {
+    await t.mockReply("**回答**：测试内容\n\n```js\nconst a = 1\n```")
+    await t.seed()
+    await t.selectIn("m2")
+    await t.page.locator("[data-qa='bubble']").getByRole("button", { name: /追问/ }).click()
+    await t.page.waitForTimeout(300)
+
+    const win = t.page.locator("[data-qa='window']")
+    let b = await win.boundingBox()
+    t.eq(Math.round(b.width), 420, "浮窗初始宽度")
+
+    // 先问一轮，确保内容在展开后保留
+    await win.locator("textarea").fill("测试问题")
+    await win.locator("textarea").press("Enter")
+    await t.page.waitForTimeout(800)
+
+    await win.getByRole("button", { name: /展开为大对话/ }).click()
+    await t.page.waitForTimeout(300)
+    b = await win.boundingBox()
+    t.ok(b.width > 1200 && b.height > 800, "展开后铺满视口")
+    t.ok((await win.getByRole("button", { name: /返回浮窗/ }).count()) > 0, "出现返回按钮")
+    t.eq(await win.locator("strong").count(), 1, "回答内容保留")
+    t.eq(await win.locator("pre").count(), 1, "代码块保留")
+
+    await win.getByRole("button", { name: /返回浮窗/ }).click()
+    await t.page.waitForTimeout(300)
+    b = await win.boundingBox()
+    t.eq(Math.round(b.width), 420, "返回后恢复宽度")
+    t.eq(Math.round(b.height), 460, "返回后恢复高度")
+  })
+}
+
 if (require.main === module) {
   const cases = {
     main: mainCase,
     regression: regressionSameMessage,
     favorites: regressionFavoritesPanel,
+    expand: expandCase,
   }
   const pick = process.env.CASE || "main"
   const fn = cases[pick]

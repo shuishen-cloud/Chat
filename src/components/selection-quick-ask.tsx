@@ -5,6 +5,7 @@ import {
   GripHorizontal,
   Loader2,
   Maximize2,
+  Minimize2,
   Quote,
   Square,
   Star,
@@ -52,6 +53,8 @@ type Phase = "idle" | "asking" | "answered" | "error"
 
 const MIN_W = 320
 const MIN_H = 220
+/** 大对话模式距视口边缘的留白 */
+const EXPAND_MARGIN = 24
 
 /** 限制在视口内 */
 function clamp(v: number, min: number, max: number) {
@@ -96,6 +99,11 @@ export function SelectionQuickAsk({
   )
   /** 用户是否手动调整过，调整过则不再自动跟随选区 */
   const userAdjusted = useRef(false)
+
+  /** 是否展开为大对话（占满视口） */
+  const [expanded, setExpanded] = useState(false)
+  /** 展开前的尺寸，用于返回原浮窗 */
+  const beforeExpand = useRef<{ x: number; y: number; w: number; h: number } | null>(null)
 
   // 计算气泡锚点（固定，不随选区变化）
   useLayoutEffect(() => {
@@ -355,41 +363,63 @@ export function SelectionQuickAsk({
       data-qa="window"
       data-qa-msg={ctx.messageId}
       className="fixed z-50 flex flex-col overflow-hidden rounded-xl border border-border bg-popover shadow-xl"
-      style={{ left: frame.x, top: frame.y, width: frame.w, height: frame.h }}
+      style={
+        expanded
+          ? { left: EXPAND_MARGIN, top: EXPAND_MARGIN,
+              width: `calc(100vw - ${EXPAND_MARGIN * 2}px)`,
+              height: `calc(100vh - ${EXPAND_MARGIN * 2}px)` }
+          : { left: frame.x, top: frame.y, width: frame.w, height: frame.h }
+      }
     >
       {/* 标题栏（拖动区） */}
       <div
-        className="flex shrink-0 cursor-grab touch-none items-center gap-1.5 border-b border-border px-2 py-1.5 active:cursor-grabbing"
-        onPointerDown={onHeaderPointerDown}
-        onPointerMove={onHeaderPointerMove}
-        onPointerUp={onHeaderPointerUp}
-        onPointerCancel={onHeaderPointerUp}
+        className={cn(
+          "flex shrink-0 items-center gap-1.5 border-b border-border px-2 py-1.5",
+          expanded
+            ? ""
+            : "cursor-grab touch-none active:cursor-grabbing"
+        )}
+        onPointerDown={expanded ? undefined : onHeaderPointerDown}
+        onPointerMove={expanded ? undefined : onHeaderPointerMove}
+        onPointerUp={expanded ? undefined : onHeaderPointerUp}
+        onPointerCancel={expanded ? undefined : onHeaderPointerUp}
       >
-        <GripHorizontal className="size-3.5 shrink-0 text-muted-foreground/60" />
+        {expanded ? (
+          <Quote className="size-3.5 shrink-0 text-muted-foreground/60" />
+        ) : (
+          <GripHorizontal className="size-3.5 shrink-0 text-muted-foreground/60" />
+        )}
         <span className="flex-1 truncate text-[11px] font-medium text-muted-foreground select-none">
-          基于所选内容追问
+          {expanded ? "大对话" : "基于所选内容追问"}
         </span>
-        <Button
-          size="icon"
-          variant="ghost"
-          className="size-5 shrink-0"
-          title="复位位置与大小"
-          onClick={() => {
-            userAdjusted.current = false
-            const vw = window.innerWidth
-            const vh = window.innerHeight
-            const w = 420
-            const h = 460
-            setFrame({
-              x: clamp(initialRect.left + initialRect.width / 2 - w / 2, 8, vw - w - 8),
-              y: clamp(initialRect.top + 12, 8, vh - h - 8),
-              w,
-              h,
-            })
-          }}
-        >
-          <Maximize2 className="size-3" />
-        </Button>
+        {expanded ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-5 shrink-0 gap-1 px-1.5 text-[11px] text-muted-foreground"
+            title="收回到悬浮窗"
+            onClick={() => {
+              setExpanded(false)
+              if (beforeExpand.current) setFrame(beforeExpand.current)
+            }}
+          >
+            <Minimize2 className="size-3" />
+            返回浮窗
+          </Button>
+        ) : (
+          <Button
+            size="icon"
+            variant="ghost"
+            className="size-5 shrink-0"
+            title="展开为大对话"
+            onClick={() => {
+              beforeExpand.current = frame
+              setExpanded(true)
+            }}
+          >
+            <Maximize2 className="size-3" />
+          </Button>
+        )}
         <Button
           size="icon"
           variant="ghost"
@@ -401,12 +431,27 @@ export function SelectionQuickAsk({
       </div>
 
       {/* 引用片段 */}
-      <div className="max-h-16 shrink-0 overflow-y-auto border-b border-border bg-muted/50 px-2.5 py-1.5 text-[11px] leading-relaxed whitespace-pre-wrap text-muted-foreground">
-        {ctx.text.length > 300 ? `${ctx.text.slice(0, 300)}…` : ctx.text}
+      <div
+        className={cn(
+          "shrink-0 overflow-y-auto border-b border-border bg-muted/50 text-[11px] leading-relaxed whitespace-pre-wrap text-muted-foreground",
+          expanded ? "max-h-24 px-8 py-2" : "max-h-16 px-2.5 py-1.5"
+        )}
+      >
+        <div className={cn(expanded && "mx-auto w-full max-w-3xl")}>
+          {ctx.text.length > (expanded ? 800 : 300)
+            ? `${ctx.text.slice(0, expanded ? 800 : 300)}…`
+            : ctx.text}
+        </div>
       </div>
 
       {/* 对话区（占满剩余空间） */}
-      <div className="min-h-0 flex-1 overflow-y-auto px-2.5 py-2">
+      <div
+        className={cn(
+          "min-h-0 flex-1 overflow-y-auto px-2.5 py-2",
+          expanded && "px-8 py-5"
+        )}
+      >
+        <div className={cn(expanded && "mx-auto w-full max-w-3xl")}>
         {!askedQuestion && phase === "idle" ? (
           <div className="flex h-full flex-col items-center justify-center gap-1 text-center text-[11px] text-muted-foreground">
             <Quote className="size-4 opacity-40" />
@@ -443,10 +488,12 @@ export function SelectionQuickAsk({
             )}
           </div>
         )}
+        </div>
       </div>
 
       {/* 输入区 */}
-      <div className="shrink-0 border-t border-border p-2">
+      <div className={cn("shrink-0 border-t border-border p-2", expanded && "px-8 py-3")}>
+        <div className={cn(expanded && "mx-auto w-full max-w-3xl")}>
         <Textarea
           ref={taRef}
           value={question}
@@ -499,9 +546,11 @@ export function SelectionQuickAsk({
             </Button>
           )}
         </div>
+        </div>
       </div>
 
-      {/* 缩放手柄 */}
+      {/* 缩放手柄（展开态隐藏） */}
+      {!expanded && (
       <div
         className={cn(
           "absolute right-0 bottom-0 size-4 cursor-nwse-resize touch-none",
@@ -513,6 +562,7 @@ export function SelectionQuickAsk({
         onPointerCancel={onResizeUp}
         title="拖动调整大小"
       />
+      )}
     </div>
   )
 }
