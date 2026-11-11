@@ -58,6 +58,13 @@ CASE=--list node scripts/test-quick-ask.cjs
 | `editNodeContent` | 直接改写节点内容 |
 | `restoreNodeContent` | 还原为原文 |
 | `multiEdgeConvergeKeepsAll` | 多线汇聚同一节点时结果拼接保留 |
+| `colorMarks` | 节点/连线颜色标记持久化 |
+| `colorConversation` | 侧边栏会话颜色标记 |
+| `hueDarkContrast` | 暗色配色不与浅色复用（防过曝） |
+| `runSingleEdge` | 不建任务直接执行一条线 |
+| `runEdgeKeyboard` | 选中线按 Enter / Ctrl+Enter 执行 |
+| `thinkingToggle` | 关闭思考后请求体不含非标字段 |
+| `historyRendering` | 历史区含时间/提示词/输入摘要 |
 | `selectionSerializesStructure` | 选区还原 Markdown：表格/代码块/列表结构正确 |
 | `selectionAddToBoard` | 划词加入**指定**画板，片段保留结构 |
 
