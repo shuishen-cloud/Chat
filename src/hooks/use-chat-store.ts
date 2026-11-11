@@ -36,6 +36,8 @@ export interface FavoriteEntry {
 
 export function useChatStore() {
   const [state, setState] = useState<ChatState>(() => loadState())
+  /** 供内部触发「打开设置」对话框 */
+  const openSettingsRef = useRef<(() => void) | null>(null)
   const abortRef = useRef<AbortController | null>(null)
   const [streamingConvId, setStreamingConvId] = useState<string | null>(null)
 
@@ -545,32 +547,35 @@ export function useChatStore() {
       const content = text.trim()
       if (!content || streamingConvId) return
 
-      // 1) 先确定目标会话 id（可能需新建），再一次性写入用户消息 + 占位回复
-      let convId: string | null = null
-      let history: Message[] = []
+      // 1) 先在当前 state 上同步计算目标会话与历史，
+      //    不能依赖 setState updater 里的赋值（并发渲染下 updater 可能延迟执行）
+      let targetConvId = state.activeConversationId
+      let targetProjectId = state.activeProjectId
+      let created: Conversation | null = null
+
+      if (!targetConvId) {
+        if (!targetProjectId) return
+        created = createConversation(targetProjectId)
+        targetConvId = created.id
+      }
+
+      const sourceConv =
+        created ?? state.conversations.find((c) => c.id === targetConvId)!
+      const history = sourceConv.messages
+      const resolvedConvId: string = targetConvId
+
+      const userMsg = newMessage("user", content)
+      const reply: Message = { ...newMessage("assistant", ""), streaming: true }
 
       setState((prev) => {
-        let conversations = prev.conversations
-        let targetId = prev.activeConversationId
-
-        if (!targetId) {
-          if (!prev.activeProjectId) return prev
-          const created = createConversation(prev.activeProjectId)
-          conversations = [...conversations, created]
-          targetId = created.id
-        }
-
-        const target = conversations.find((c) => c.id === targetId)!
-        convId = target.id
-        history = target.messages
-
-        const userMsg = newMessage("user", content)
-        const reply = { ...newMessage("assistant", ""), streaming: true }
-
+        const exists = prev.conversations.some((c) => c.id === resolvedConvId)
+        const conversations = exists
+          ? prev.conversations
+          : [...prev.conversations, created!]
         return {
           ...prev,
           conversations: conversations.map((c) =>
-            c.id === targetId
+            c.id === resolvedConvId
               ? {
                   ...c,
                   messages: [...c.messages, userMsg, reply],
@@ -582,9 +587,6 @@ export function useChatStore() {
           ),
         }
       })
-
-      if (!convId) return
-      const targetConvId: string = convId
 
       // 2) 节流写出增量，避免每个 token 都触发整棵树重渲染
       let pendingContent = ""
@@ -644,7 +646,14 @@ export function useChatStore() {
         aborted = (err as Error)?.name === "AbortError"
         if (!aborted) {
           const message = err instanceof Error ? err.message : String(err)
-          toast.error(message, { duration: 6000 })
+          // 未配置 Key 时给出可操作提示，避免只显示空白回复
+          const missingKey = !state.apiKey.trim()
+          toast.error(message, {
+            duration: missingKey ? 10000 : 6000,
+            action: missingKey
+              ? { label: "去设置", onClick: () => openSettingsRef.current?.() }
+              : undefined,
+          })
           updateMessages(targetConvId, (messages) =>
             messages.map((m) =>
               m.role === "assistant" && m.streaming
@@ -807,6 +816,10 @@ export function useChatStore() {
   }, [])
 
   return {
+    /** 由 App 注册：打开设置对话框 */
+    registerOpenSettings: (fn: () => void) => {
+      openSettingsRef.current = fn
+    },
     state,
     projects,
     activeProject,

@@ -41,6 +41,11 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const { dark, toggle } = useTheme()
 
+  // 让 store 能触发设置对话框
+  useEffect(() => {
+    store.registerOpenSettings(() => setSettingsOpen(true))
+  }, [store])
+
   return (
     <TooltipProvider>
       <div className="flex h-dvh w-full overflow-hidden bg-background text-foreground">

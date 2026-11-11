@@ -201,12 +201,52 @@ function asConversationCase() {
   })
 }
 
+/** 顶栏对话快速切换 */
+function switcherCase() {
+  return run(async (t) => {
+    await t.seed({
+      projects: [{ id: "p1", name: "前端", createdAt: 1 }],
+      conversations: [
+        { id: "c1", projectId: "p1", title: "第一个对话", createdAt: 1, updatedAt: 3,
+          messages: [{ id: "a1", role: "assistant", content: "内容一", createdAt: 1 }] },
+        { id: "c2", projectId: "p1", title: "第二个对话", createdAt: 1, updatedAt: 2,
+          messages: [{ id: "b1", role: "assistant", content: "内容二", createdAt: 1 }] },
+        { id: "c3", projectId: "p1", title: "关于 React 的讨论", createdAt: 1, updatedAt: 1,
+          messages: [{ id: "d1", role: "assistant", content: "React 内容", createdAt: 1 }] },
+      ],
+      favorites: [], tags: [], activeProjectId: "p1", activeConversationId: "c1",
+      apiKey: "sk-t", baseUrl: "https://api.deepseek.com",
+      model: "deepseek-v4-pro", sidebarView: "list",
+    })
+
+    const trigger = t.page.locator("main button[title='切换对话']")
+    t.ok((await trigger.count()) > 0, "顶栏有切换器")
+    await trigger.click()
+    await t.page.waitForTimeout(300)
+    t.ok(
+      (await t.page.locator("[role=menu] button").allTextContents()).some((x) =>
+        x.includes("第一个对话")
+      ),
+      "列出对话"
+    )
+
+    const inp = t.page.getByPlaceholder("搜索对话", { exact: true })
+    await inp.fill("React")
+    await t.page.waitForTimeout(300)
+    await inp.press("Enter")
+    await t.page.waitForTimeout(400)
+    t.eq((await t.state()).activeConversationId, "c3", "回车切换到目标对话")
+    t.ok((await trigger.innerText()).includes("关于 React"), "标题已更新")
+  })
+}
+
 if (require.main === module) {
   const cases = {
     main: mainCase,
     regression: regressionSameMessage,
     favorites: regressionFavoritesPanel,
     asconversation: asConversationCase,
+    switcher: switcherCase,
   }
   const pick = process.env.CASE || "main"
   const fn = cases[pick]

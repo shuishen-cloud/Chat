@@ -1,5 +1,11 @@
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import {
+  Search,
+  Plus,
+  Pin,
+  MessageSquare,
+  ChevronDown,
+  Check,
   AlertCircle,
   ArrowUp,
   Brain,
@@ -17,6 +23,8 @@ import {
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
+import { Input } from "@/components/ui/input"
+import { Separator } from "@/components/ui/separator"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -77,9 +85,7 @@ export function ChatMain({ store, onOpenSettings, history, draft, onDraftConsume
       {/* 顶栏 */}
       <header className="flex h-14 shrink-0 items-center gap-2 border-b border-border px-4">
         <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-medium">
-            {activeConversation?.title ?? "新对话"}
-          </div>
+          <ConversationSwitcher store={store} />
           <div className="truncate text-xs text-muted-foreground">
             {activeProject?.name ?? "未选择项目"} · {state.model}
           </div>
@@ -571,3 +577,146 @@ function Composer({
 }
 
 export type { Conversation }
+
+/* ------------------------------------------------------------------ */
+
+/**
+ * 顶栏对话快速切换：类似 DeepSeek 网页版的历史下拉。
+ * 支持搜索、展示最近对话、键盘上下选择。
+ */
+function ConversationSwitcher({ store }: { store: ChatStore }) {
+  const { projectConversations, activeConversation, selectConversation, addConversation } = store
+  const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState("")
+  const [cursor, setCursor] = useState(0)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  const list = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    const base = projectConversations.filter((c) => !c.archived)
+    if (!q) return base
+    return base.filter(
+      (c) =>
+        c.title.toLowerCase().includes(q) ||
+        c.messages.some((m) => m.content.toLowerCase().includes(q))
+    )
+  }, [projectConversations, query])
+
+  useEffect(() => {
+    if (open) {
+      setQuery("")
+      setCursor(0)
+      requestAnimationFrame(() => inputRef.current?.focus())
+    }
+  }, [open])
+
+  useEffect(() => setCursor(0), [query])
+
+  function onKeyDown(e: React.KeyboardEvent) {
+    if (e.key === "ArrowDown") {
+      e.preventDefault()
+      setCursor((c) => Math.min(c + 1, list.length - 1))
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault()
+      setCursor((c) => Math.max(c - 1, 0))
+    } else if (e.key === "Enter") {
+      e.preventDefault()
+      const target = list[cursor]
+      if (target) {
+        selectConversation(target.id)
+        setOpen(false)
+      }
+    } else if (e.key === "Escape") {
+      setOpen(false)
+    }
+  }
+
+  return (
+    <DropdownMenu open={open} onOpenChange={setOpen}>
+      <DropdownMenuTrigger
+        render={
+          <button
+            type="button"
+            className="group/sw flex w-full min-w-0 items-center gap-1 rounded-md px-1 py-0.5 -ml-1 text-left transition-colors hover:bg-accent/60"
+            title="切换对话"
+          >
+            <span className="truncate text-sm font-medium">
+              {activeConversation?.title ?? "新对话"}
+            </span>
+            <ChevronDown className="size-3.5 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover/sw:opacity-100" />
+          </button>
+        }
+      />
+      <DropdownMenuContent align="start" className="w-[min(520px,90vw)] p-0">
+        {/* 搜索 */}
+        <div className="border-b border-border p-2">
+          <div className="relative">
+            <Search className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              ref={inputRef}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={onKeyDown}
+              placeholder="搜索对话"
+              className="h-8 pl-7 text-xs"
+            />
+          </div>
+        </div>
+
+        <div className="max-h-[340px] overflow-y-auto p-1">
+          {list.length === 0 ? (
+            <div className="px-3 py-8 text-center text-xs text-muted-foreground">
+              {query ? "没有匹配的对话" : "当前项目还没有对话"}
+            </div>
+          ) : (
+            list.map((c, i) => {
+              const active = c.id === activeConversation?.id
+              return (
+                <button
+                  key={c.id}
+                  type="button"
+                  onMouseEnter={() => setCursor(i)}
+                  onClick={() => {
+                    selectConversation(c.id)
+                    setOpen(false)
+                  }}
+                  className={cn(
+                    "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors",
+                    i === cursor && "bg-accent",
+                    active && "font-medium"
+                  )}
+                >
+                  {c.pinned ? (
+                    <Pin className="size-3.5 shrink-0 text-muted-foreground" />
+                  ) : c.branchedFrom ? (
+                    <GitBranch className="size-3.5 shrink-0 text-muted-foreground" />
+                  ) : (
+                    <MessageSquare className="size-3.5 shrink-0 text-muted-foreground" />
+                  )}
+                  <span className="min-w-0 flex-1 truncate">{c.title}</span>
+                  <span className="shrink-0 text-[10px] text-muted-foreground">
+                    {c.messages.length > 0 ? `${c.messages.length} 条` : "空"}
+                  </span>
+                  {active && <Check className="size-3.5 shrink-0" />}
+                </button>
+              )
+            })
+          )}
+        </div>
+
+        <Separator />
+        <button
+          type="button"
+          onClick={() => {
+            addConversation()
+            setOpen(false)
+          }}
+          className="flex w-full items-center gap-2 px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-accent"
+        >
+          <Plus className="size-3.5" />
+          新建对话
+        </button>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
