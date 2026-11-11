@@ -130,16 +130,17 @@ export function SelectionQuickAsk({
       const target = e.target as HTMLElement | null
       if (!target) return
       if (boxRef.current?.contains(target)) return
-      // 辅助 UI（侧边栏/收藏面板/对话框/提示）与消息正文都不关闭，
-      // 便于一边选新文本开新窗、一边保留已有的悬浮窗。
-      const keep =
-        target.closest("[data-qa]") ||
-        target.closest("aside") ||
-        target.closest("[data-aux-panel]") ||
-        target.closest("[data-message-id]") ||
-        target.closest("[data-slot='dialog-content']") ||
-        target.closest("[data-sonner-toaster]")
-      if (keep) return
+      // 采用白名单：只有点在这些区域才关闭。
+      // 未列出的新面板一律保留窗口，避免每加一个 UI 就踩一次坑。
+      const closable =
+        target.closest("main") &&
+        !target.closest("[data-qa]") &&
+        !target.closest("[data-message-id]") &&
+        !target.closest("[data-aux-panel]") &&
+        !target.closest("aside") &&
+        !target.closest("[data-slot='dialog-content']") &&
+        !target.closest("[data-sonner-toaster]")
+      if (!closable) return
       onClose()
     }
     document.addEventListener("mousedown", onDown)

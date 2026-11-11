@@ -186,6 +186,7 @@ export function FavoritesPanel({ open, onOpenChange, store }: Props) {
 
   return (
     <div
+      data-aux-panel="favorites"
       className={cn(
         "relative z-40 flex h-full shrink-0 flex-col overflow-hidden border-r border-border bg-sidebar transition-[width] duration-200 ease-out",
         open ? "w-[380px]" : "w-0 border-r-0"

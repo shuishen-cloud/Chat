@@ -1,6 +1,8 @@
 const { run } = require("./test-harness.cjs")
 
-run(async (t) => {
+/** 主用例：气泡 / 展开 / 多窗共存 / 独立性 / 关闭 */
+function mainCase() {
+  return run(async (t) => {
   await t.mockReply("**回答**：Zustand 更轻量。\n\n- 无样板\n- 支持中间件")
   await t.seed()
 
@@ -56,8 +58,9 @@ run(async (t) => {
   // 关闭按钮是标题栏最后一个（X）
   await wins.nth(0).locator("div.cursor-grab button").last().click()
   await t.until(async () => (await t.count("div.fixed.z-50.overflow-hidden")) === 1)
-  t.eq(await t.count("div.fixed.z-50.overflow-hidden"), 1, "关闭一个后剩一个")
-})
+    t.eq(await t.count("div.fixed.z-50.overflow-hidden"), 1, "关闭一个后剩一个")
+  })
+}
 
 /** 回归：开启第一个浮窗后，在同一消息的另一段文字上仍能弹出追问气泡 */
 function regressionSameMessage() {
@@ -94,6 +97,74 @@ function regressionSameMessage() {
   })
 }
 
-if (require.main === module && process.env.CASE === "regression") {
-  regressionSameMessage()
+
+
+/** 回归：收藏面板打开后，在面板内操作不应关闭悬浮窗 */
+function regressionFavoritesPanel() {
+  const { run } = require("./test-harness.cjs")
+  return run(async (t) => {
+    await t.seed({
+      projects: [{ id: "p1", name: "前端", createdAt: 1 }],
+      conversations: [
+        {
+          id: "c1",
+          projectId: "p1",
+          title: "对话A",
+          createdAt: 1,
+          updatedAt: 2,
+          messages: [
+            {
+              id: "a1",
+              role: "assistant",
+              content: "这是第一段内容，用来测试选区功能。",
+              createdAt: 1,
+            },
+          ],
+        },
+      ],
+      favorites: [
+        { id: "f1", conversationId: "c1", messageId: "a1", tagIds: [], createdAt: 2 },
+      ],
+      tags: [],
+      activeProjectId: "p1",
+      activeConversationId: "c1",
+      apiKey: "sk-t",
+      baseUrl: "https://api.deepseek.com",
+      model: "deepseek-v4-pro",
+      sidebarView: "list",
+    })
+
+    await t.selectIn("a1")
+    await t.page.locator("[data-qa='bubble']").getByRole("button", { name: /追问/ }).click()
+    await t.page.waitForTimeout(300)
+
+    // 打开收藏面板
+    const entry = t.page.locator("aside button").filter({ hasText: /^收藏/ }).first()
+    let b = await entry.boundingBox()
+    await t.page.mouse.click(b.x + b.width / 2, b.y + b.height / 2)
+    await t.page.waitForTimeout(400)
+    t.eq(await t.count("[data-qa='window']"), 1, "打开收藏面板后窗口仍在")
+
+    // 点面板内空白
+    const panel = t.page.locator("[data-aux-panel='favorites']").first()
+    b = await panel.boundingBox()
+    await t.page.mouse.click(b.x + b.width / 2, b.y + b.height - 60)
+    await t.page.waitForTimeout(300)
+    t.eq(await t.count("[data-qa='window']"), 1, "点收藏面板空白后窗口仍在")
+  })
+}
+
+if (require.main === module) {
+  const cases = {
+    main: mainCase,
+    regression: regressionSameMessage,
+    favorites: regressionFavoritesPanel,
+  }
+  const pick = process.env.CASE || "main"
+  const fn = cases[pick]
+  if (!fn) {
+    console.error(`未知用例: ${pick}，可选 ${Object.keys(cases).join(" / ")}`)
+    process.exit(1)
+  }
+  fn()
 }
