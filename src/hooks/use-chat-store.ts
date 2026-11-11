@@ -51,7 +51,8 @@ export interface BoardNodeEntry {
   text: string
 }
 
-/** 收藏项 + 解析后的关联对象 */export interface FavoriteEntry {
+/** 收藏项 + 解析后的关联对象 */
+export interface FavoriteEntry {
   favorite: Favorite
   message: Message
   conversation: Conversation
@@ -85,9 +86,21 @@ export function useChatStore() {
   const abortRef = useRef<AbortController | null>(null)
   const [streamingConvId, setStreamingConvId] = useState<string | null>(null)
 
-  // 持久化（防抖）
+  // 持久化（防抖）。失败时提示一次，避免用户误以为已保存
+  const saveFailedRef = useRef(false)
   useEffect(() => {
-    const t = setTimeout(() => saveState(state), 200)
+    const t = setTimeout(() => {
+      const ok = saveState(state)
+      if (!ok && !saveFailedRef.current) {
+        saveFailedRef.current = true
+        toast.error("本地存储已满，修改可能无法保留", {
+          duration: 10000,
+          description: "建议导出重要对话后清理旧数据",
+        })
+      } else if (ok) {
+        saveFailedRef.current = false
+      }
+    }, 200)
     return () => clearTimeout(t)
   }, [state])
 
@@ -597,6 +610,18 @@ export function useChatStore() {
     [state.boards, state.activeBoardId]
   )
 
+  /**
+   * 根据画板 id 取展示名。
+   *
+   * 多个入口（多选栏、划词浮层、消息动作条）都要把 id 换成提示文案，
+   * 回退字统一放在这里，避免各处写不一致的默认值。
+   */
+  const boardName = useCallback(
+    (boardId: string | null | undefined, fallback = "画板"): string =>
+      state.boards.find((b) => b.id === boardId)?.name ?? fallback,
+    [state.boards]
+  )
+
   /** 当前画板的节点 + 解析后的源消息 */
   const boardNodeEntries = useMemo((): BoardNodeEntry[] => {
     if (!activeBoard) return []
@@ -783,6 +808,24 @@ export function useChatStore() {
     },
     [setState]
   )
+
+  /**
+   * 「一键加入画板」：在 addMessageToBoard 之上处理两种常见情况并给出提示。
+   *
+   * 1) 当前没有画板 → 先建一个再加入；
+   * 2) 消息已存在 → 提示而不是默默忽略。
+   * 消息动作条与画板面板的「添加单条消息」都用它，避免两处文案与分支漂移。
+   */
+  const addMessageToBoardSmart = useCallback(
+    (conversationId: string, messageId: string): boolean => {
+      const targetBoardId = stateRef.current.activeBoardId ?? addBoard().id
+      const ok = addMessageToBoard(conversationId, messageId, targetBoardId)
+      toast[ok ? "success" : "info"](ok ? "已加入画板" : "该消息已在画板上")
+      return ok
+    },
+    [addBoard, addMessageToBoard]
+  )
+
 
   /**
    * 把一段选中文字摘录进画板。
@@ -1009,7 +1052,12 @@ export function useChatStore() {
   /* ---------------- 连线编辑 ---------------- */
 
   const updateEdge = useCallback(
-    (edgeId: string, patch: Partial<Pick<BoardEdge, "prompt" | "enabled" | "kind" | "label">>) => {
+    (
+      edgeId: string,
+      patch: Partial<
+        Pick<BoardEdge, "prompt" | "enabled" | "kind" | "label" | "promptHue">
+      >
+    ) => {
       setState((prev) => ({
         ...prev,
         boardEdges: prev.boardEdges.map((e) =>
@@ -1181,14 +1229,25 @@ export function useChatStore() {
     abortRef.current = null
   }, [])
 
+  /**
+   * 发送一条用户消息并流式接收回复。
+   *
+   * `override` 用于「重新生成」：调用方已经算好了截断后的历史，
+   * 需要把它直接交给 send，而不是让 send 再读一次 state 闭包。
+   * 否则 setState 与 await send 之间会读到截断**前**的旧历史，
+   * 导致最后一条提问被发送两遍、旧回答仍留在上下文里。
+   */
   const send = useCallback(
-    async (text: string) => {
+    async (
+      text: string,
+      override?: { conversationId: string; history: Message[] }
+    ) => {
       const content = text.trim()
       if (!content || streamingConvId) return
 
       // 1) 先在当前 state 上同步计算目标会话与历史，
       //    不能依赖 setState updater 里的赋值（并发渲染下 updater 可能延迟执行）
-      let targetConvId = state.activeConversationId
+      let targetConvId = override?.conversationId ?? state.activeConversationId
       let targetProjectId = state.activeProjectId
       let created: Conversation | null = null
 
@@ -1201,9 +1260,10 @@ export function useChatStore() {
         targetConvId = created.id
       }
 
+      // override 路径下会话一定已存在，直接用调用方给的快照
       const sourceConv =
         created ?? state.conversations.find((c) => c.id === targetConvId)!
-      const history = sourceConv.messages
+      const history = override?.history ?? sourceConv.messages
       const resolvedConvId: string = targetConvId
 
       const userMsg = newMessage("user", content)
@@ -1344,28 +1404,59 @@ export function useChatStore() {
     ]
   )
 
+  /**
+   * 重新生成。
+   *
+   * 不传 messageId 时作用于最后一条问答；传 messageId 时从该消息处就开新。
+   * 历史统一从 stateRef 取最新值，并把截断后的结果显式传给 send，
+   * 避免 send 读到本轮 render 的旧 state 闭包（否则提问会重复进上下文）。
+   */
   const regenerate = useCallback(
-    async (conv: Conversation) => {
+    async (conv: Conversation, messageId?: string) => {
       if (streamingConvId) return
-      const lastUser = [...conv.messages].reverse().find((m) => m.role === "user")
-      if (!lastUser) return
+
+      // 以 ref 为准，避免外部传入的 conv 已经过期
+      const latestConv =
+        stateRef.current.conversations.find((c) => c.id === conv.id) ?? conv
+      const msgs = latestConv.messages
+
+      /*
+       * 确定要重跑的哪一条 user 提问：
+       *  - 指定了 messageId：取该位置及之前最后一条 user
+       *  - 否则：取全段最后一条 user
+       */
+      const anchorIdx = messageId
+        ? msgs.findIndex((m) => m.id === messageId)
+        : msgs.length - 1
+      if (anchorIdx === -1) return
+
+      let userIdx = -1
+      for (let i = anchorIdx; i >= 0; i--) {
+        if (msgs[i].role === "user") {
+          userIdx = i
+          break
+        }
+      }
+      if (userIdx === -1) return
+
+      const lastUser = msgs[userIdx]
+      // 截断到这条提问之前；send 会重新追加这条提问
+      const trimmed = msgs.slice(0, userIdx)
 
       setState((prev) => ({
         ...prev,
-        conversations: prev.conversations.map((c) => {
-          if (c.id !== conv.id) return c
-          const trimmed = c.messages.slice()
-          while (trimmed.length && trimmed[trimmed.length - 1].role === "assistant") {
-            trimmed.pop()
-          }
-          // 去掉最后一条 user（send 会重新追加）
-          if (trimmed.length && trimmed[trimmed.length - 1].id === lastUser.id) {
-            trimmed.pop()
-          }
-          return { ...c, messages: trimmed, updatedAt: Date.now() }
-        }),
+        conversations: prev.conversations.map((c) =>
+          c.id === latestConv.id
+            ? { ...c, messages: trimmed, updatedAt: Date.now() }
+            : c
+        ),
       }))
-      await send(lastUser.content)
+
+      // 关键：把截断后的历史显式交给 send
+      await send(lastUser.content, {
+        conversationId: latestConv.id,
+        history: trimmed,
+      })
     },
     [send, streamingConvId, setState]
   )
@@ -1449,7 +1540,10 @@ export function useChatStore() {
 
   /* ---------------- 执行任务 ---------------- */
 
-  /** 解析节点的可读文本：改写优先，其次摘录，最后源消息 */
+  /**
+   * 解析节点的可读文本：改写优先，其次摘录，最后源消息。
+   * 画板节点只存引用或摘录，真正要送给模型的内容需要在这里统一拼出。
+   */
   const nodeText = useCallback(
     (node: BoardNode): string => resolveNodeText(node, state.conversations),
     [state.conversations]
@@ -1458,16 +1552,13 @@ export function useChatStore() {
   const [runningTaskId, setRunningTaskId] = useState<string | null>(null)
 
   /**
-   * 执行任务：对任务内每条可执行的 flow 边**独立**发一次请求。
-   *
-   * 刻意不做拓扑串联：边是独立单元，一条失败不影响其他边，
-   * 结果各自写回自己的终点节点。这样「只跑一条」和「跑多条」是同一套语义。
-   */
-  /**
    * 执行单条线（内部实现）。
    *
    * runEdge 与 runTask 都走这里，保证「单跑一条」与「任务里跑这条」行为完全一致。
    * 返回值用来让调用方汇总成功/失败数量。
+   *
+   * 刻意不做拓扑串联：边是独立单元，一条失败不影响其他边，
+   * 结果各自写回自己的终点节点。这样「只跑一条」和「跑多条」是同一套语义。
    */
   const execEdge = useCallback(
     async (
@@ -1597,6 +1688,12 @@ export function useChatStore() {
     [state.boardEdges, streamingConvId, runningTaskId, beginRun, execEdge]
   )
 
+  /**
+   * 执行任务：对任务内每条可执行的 flow 边逐条发请求。
+   *
+   * 多条边指向同一终点时会累积写入（见 execEdge 的 writtenTargets），
+   * 不在任务层重复这个逻辑。
+   */
   const runTask = useCallback(
     async (taskId: string) => {
       if (streamingConvId || runningTaskId) return
@@ -1704,9 +1801,17 @@ export function useChatStore() {
     const url = URL.createObjectURL(blob)
     const a = document.createElement("a")
     a.href = url
-    a.download = `${conv.title}.md`
+    /*
+     * 标题里的 / \ : * ? " < > | 在 Windows/macOS 上是非法文件名，
+     * 直接拿来 download 会被浏览器改写或整个保不住后缀。
+     */
+    a.download = `${sanitizeFilename(conv.title)}.md`
+    // 必须挂到文档上，否则部分浏览器（Firefox）不会触发下载
+    document.body.appendChild(a)
     a.click()
-    URL.revokeObjectURL(url)
+    a.remove()
+    // 立即 revoke 会让下载在部分浏览器里失败，延后释放
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
   }, [])
 
   return {
@@ -1726,6 +1831,7 @@ export function useChatStore() {
     favoriteOf,
     projectBoards,
     activeBoard,
+    boardName,
     boardNodeEntries,
     boardEdges,
     boardTasks: state.boardTasks,
@@ -1737,6 +1843,7 @@ export function useChatStore() {
     renameBoard,
     deleteBoard,
     addMessageToBoard,
+    addMessageToBoardSmart,
     addMessagesToBoard,
     addExcerptToBoard,
     addConversationToBoard,
@@ -1805,6 +1912,22 @@ export function useChatStore() {
 }
 
 export type ChatStore = ReturnType<typeof useChatStore>
+
+/**
+ * 把标题变成跨平台可用的文件名。
+ * 保留中英文与常见符号，剔除路径分隔符和 Windows 保留字符。
+ */
+function sanitizeFilename(name: string): string {
+  // 逐个字符过滤，避开正则里的控制字符范围
+  const ILLEGAL = new Set('\\/:*?"<>|')
+  const cleaned = Array.from(name)
+    .filter((ch) => ch.charCodeAt(0) >= 0x20 && !ILLEGAL.has(ch))
+    .join("")
+    // 末尾的点和空格在 Windows 上会被吞掉
+    .replace(/[. ]+$/g, "")
+    .trim()
+  return cleaned || "对话"
+}
 
 /**
  * 把某条消息滚到可视区并短暂高亮。

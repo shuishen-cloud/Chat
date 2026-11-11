@@ -138,8 +138,13 @@ export interface BoardEdge {
   /** 四向连接点标识，避免节点换边后连线错位 */
   sourceHandle?: string
   targetHandle?: string
-  /** 颜色标记（色相值） */
+  /** 线的颜色标记（色相值） */
   hue?: number
+  /**
+   * 提示词徽章的独立颜色。
+   * 与线的颜色分开：线本身可以中性，只让提示词显眼，反之亦然。
+   */
+  promptHue?: number
 }
 
 /**

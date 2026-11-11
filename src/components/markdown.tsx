@@ -89,6 +89,8 @@ function CodeBlock({ children }: { children?: React.ReactNode }) {
       <button
         type="button"
         onClick={copy}
+        // 选区序列化时不应把按钮文案当成内容（见 lib/selection-to-markdown.ts）
+        data-ui-chrome
         className="absolute top-2 right-2 rounded-md border border-border bg-background/90 px-2 py-1 text-[11px] text-muted-foreground opacity-0 transition-opacity group-hover/code:opacity-100 hover:text-foreground"
       >
         {copied ? "已复制" : "复制"}

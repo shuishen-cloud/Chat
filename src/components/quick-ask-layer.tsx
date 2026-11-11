@@ -82,6 +82,27 @@ export function QuickAskLayer({
     promoteRef.current = promote
   }, [promote])
 
+  /**
+   * 把选中片段加入画板。
+   * boardId 为 null 表示新建画板；与追问共用同一个选区上下文，
+   * 因此「划词 → 追问 / 收藏 / 进画板」是同一套交互。
+   */
+  const addToBoard = useCallback(
+    (ctx: SelectionContext, boardId: string | null) => {
+      const targetId = boardId ?? store.addBoard().id
+      store.addExcerptToBoard(
+        ctx.conversationId,
+        ctx.messageId,
+        ctx.markdown || ctx.text,
+        targetId
+      )
+      const name = store.boardName(targetId)
+      toast.success(`已把选中内容加入「${name}」`)
+      clearSelection()
+    },
+    [store, clearSelection]
+  )
+
   const favoriteQuote = useCallback(
     (ctx: SelectionContext) => {
       const exists = store.favoriteOf(ctx.conversationId, ctx.messageId)
@@ -114,6 +135,7 @@ export function QuickAskLayer({
           store={store}
           onClose={() => close(inst.key)}
           onQuoteFavorite={favoriteQuote}
+          onAddToBoard={addToBoard}
           onAsk={() => promoteRef.current(inst.ctx)}
         />
       ))}
@@ -132,6 +154,7 @@ export function QuickAskLayer({
           store={store}
           onClose={() => clearSelection()}
           onQuoteFavorite={favoriteQuote}
+          onAddToBoard={addToBoard}
           onAsk={() => promoteRef.current(liveCtx)}
           bubbleOnly
         />

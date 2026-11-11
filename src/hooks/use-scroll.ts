@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react"
+import { rangeToMarkdown } from "@/lib/selection-to-markdown"
 
 /**
  * 智能贴底滚动：用户没有手动上滚时自动跟随到底部。
@@ -65,7 +66,10 @@ export function useSelectionWatcher(
   enabled: boolean
 ) {
   const [selection, setSelection] = useState<{
+    /** 纯文本（用于长度判断等） */
     text: string
+    /** 还原成 Markdown 的选区内容（表格/代码块/列表保持结构） */
+    markdown: string
     messageId: string
     rect: { top: number; left: number; width: number; height: number }
   } | null>(null)
@@ -115,8 +119,13 @@ export function useSelectionWatcher(
         return
       }
 
+      // selection.toString() 在表格里会用 \t 连接单元格、在代码块里丢缩进，
+      // 因此改为按 DOM 结构重新序列化
+      const markdown = rangeToMarkdown(range) || text
+
       setSelection({
         text,
+        markdown,
         messageId: holder.dataset.messageId!,
         rect: { top: r.top, left: r.left, width: r.width, height: r.height },
       })

@@ -14,6 +14,7 @@ import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Markdown } from "@/components/markdown"
+import { BoardPickerMenu } from "@/components/board-picker-menu"
 import { streamChat } from "@/lib/deepseek"
 import type { ChatStore } from "@/hooks/use-chat-store"
 import { cn } from "@/lib/utils"
@@ -21,6 +22,8 @@ import { cn } from "@/lib/utils"
 /** 一次选区上下文 */
 export interface SelectionContext {
   text: string
+  /** 选区还原出的 Markdown；表格/代码块/列表保留结构 */
+  markdown: string
   /** 选区所在的消息 */
   messageId: string
   conversationId: string
@@ -39,6 +42,8 @@ interface Props {
   index: number
   /** 点击气泡「收藏片段」时的回调 */
   onQuoteFavorite: (ctx: SelectionContext) => void
+  /** 把选中片段加入指定画板；boardId 为空表示新建画板 */
+  onAddToBoard: (ctx: SelectionContext, boardId: string | null) => void
   /** 关闭并移除该悬浮窗 */
   onClose: () => void
   /** 点气泡「追问」时通知外层升级为展开窗口 */
@@ -72,6 +77,7 @@ export function SelectionQuickAsk({
   autoOpen = false,
   index,
   onQuoteFavorite,
+  onAddToBoard,
   onClose,
   onAsk,
   bubbleOnly = false,
@@ -255,7 +261,7 @@ export function SelectionQuickAsk({
           {
             id: "ctx",
             role: "user",
-            content: `下面是我在某段对话中选中的内容：\n\n"""\n${ctx.text}\n"""\n\n请基于它回答：${q}`,
+            content: `下面是我在某段对话中选中的内容：\n\n"""\n${ctx.markdown || ctx.text}\n"""\n\n请基于它回答：${q}`,
             createdAt: Date.now(),
           },
         ],
@@ -279,7 +285,7 @@ export function SelectionQuickAsk({
     } finally {
       abortRef.current = null
     }
-  }, [question, phase, state.apiKey, state.baseUrl, state.model])
+  }, [question, phase, state.apiKey, state.baseUrl, state.model, ctx, history])
 
   const stop = useCallback(() => {
     abortRef.current?.abort()
@@ -373,6 +379,12 @@ export function SelectionQuickAsk({
           <Star className="size-3" />
           收藏
         </Button>
+        <BoardPickerMenu
+          boards={store.projectBoards}
+          title="加入指定画板"
+          onPick={(boardId) => onAddToBoard(ctx, boardId)}
+          onCreate={() => onAddToBoard(ctx, null)}
+        />
       </div>
     )
   }

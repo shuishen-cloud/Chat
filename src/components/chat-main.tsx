@@ -19,6 +19,9 @@ import {
   Square,
   Star,
   Trash2,
+  LayoutGrid,
+  ListChecks,
+  SquareCheck,
 } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
@@ -33,6 +36,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Markdown, TypingCursor } from "@/components/markdown"
+import { BoardPickerMenu } from "@/components/board-picker-menu"
 import { useSelectionWatcher, useStickToBottom } from "@/hooks/use-scroll"
 import { QuickAskLayer } from "@/components/quick-ask-layer"
 import type { ChatStore } from "@/hooks/use-chat-store"
@@ -62,10 +66,15 @@ export function ChatMain({ store, onOpenSettings, history, draft, onDraftConsume
     branchFrom,
     toggleFavorite,
     favoriteOf,
+    addMessageToBoardSmart,
+    addMessagesToBoard,
+    projectBoards,
+    boardName,
     clearConversation,
     deleteConversation,
     exportMarkdown,
     selectConversation,
+    addBoard,
   } = store
 
   const messages = activeConversation?.messages ?? []
@@ -74,11 +83,63 @@ export function ChatMain({ store, onOpenSettings, history, draft, onDraftConsume
     `${activeConversation?.id ?? ""}:${messages.length}:${lastContent.length}`
   )
 
+  /**
+   * 勾选模式：一次挑多条消息放进指定画板。
+   * 单条「加入画板」适合随手收藏，多选才适合「把这几段结论整理成一张图」。
+   */
+  const [selectMode, setSelectMode] = useState(false)
+  const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set())
+  /** 批量加入的目标画板，默认当前激活画板 */
+  const [targetBoardId, setTargetBoardId] = useState<string | null>(
+    store.state.activeBoardId
+  )
+
   // 选区追问
   const { selection, clear: clearSelection } = useSelectionWatcher(
     scrollRef,
-    !!activeConversation && !isStreaming
+    // 多选时点击消息用于勾选，划词浮层会抢交互，先关掉
+    !!activeConversation && !isStreaming && !selectMode
   )
+
+  const exitSelectMode = () => {
+    setSelectMode(false)
+    setCheckedIds(new Set())
+  }
+
+  const toggleCheck = (id: string) => {
+    setCheckedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  /** 批量加入选中的消息到目标画板 */
+  function addCheckedToBoard() {
+    if (!activeConversation || checkedIds.size === 0) return
+    let boardId = targetBoardId
+    if (!boardId) {
+      const board = addBoard()
+      boardId = board.id
+    }
+    const { added, skipped } = addMessagesToBoard(
+      activeConversation.id,
+      [...checkedIds],
+      boardId
+    )
+    const targetName = boardName(boardId)
+    if (added === 0) {
+      toast.info(`选中的消息都已在「${targetName}」里`)
+    } else {
+      toast.success(
+        skipped > 0
+          ? `已加入 ${added} 条到「${targetName}」，${skipped} 条已存在`
+          : `已加入 ${added} 条到「${targetName}」`
+      )
+    }
+    exitSelectMode()
+  }
 
   return (
     <main className="flex h-full min-w-0 flex-1 flex-col bg-background">
@@ -90,6 +151,19 @@ export function ChatMain({ store, onOpenSettings, history, draft, onDraftConsume
             {activeProject?.name ?? "未选择项目"} · {state.model}
           </div>
         </div>
+
+        {activeConversation && messages.length > 0 && (
+          <Button
+            variant={selectMode ? "secondary" : "ghost"}
+            size="sm"
+            className="h-8 gap-1.5 text-xs"
+            onClick={() => (selectMode ? exitSelectMode() : setSelectMode(true))}
+            title="勾选多条消息，批量加入画板"
+          >
+            <ListChecks className="size-3.5" />
+            {selectMode ? "退出多选" : "多选"}
+          </Button>
+        )}
 
         {activeConversation && (
           <DropdownMenu>
@@ -135,6 +209,51 @@ export function ChatMain({ store, onOpenSettings, history, draft, onDraftConsume
         )}
       </header>
 
+      {/* 多选操作栏 */}
+      {selectMode && (
+        <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border bg-muted/40 px-4 py-2">
+          <span className="text-xs text-muted-foreground">
+            已选 <span className="font-medium text-foreground">{checkedIds.size}</span> 条
+          </span>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 px-2 text-[11px]"
+            onClick={() =>
+              setCheckedIds(
+                checkedIds.size === messages.length
+                  ? new Set()
+                  : new Set(messages.map((m) => m.id))
+              )
+            }
+          >
+            {checkedIds.size === messages.length ? "取消全选" : "全选"}
+          </Button>
+
+          <BoardPickerMenu
+            boards={projectBoards}
+            selectedId={targetBoardId}
+            title="加入哪个画板"
+            label={boardName(targetBoardId, "新建画板")}
+            variant="outline"
+            triggerClassName="h-7"
+            onPick={setTargetBoardId}
+            onCreate={() => setTargetBoardId(null)}
+          />
+
+          <div className="flex-1" />
+          <Button
+            size="sm"
+            className="h-7 gap-1 px-3 text-[11px]"
+            disabled={checkedIds.size === 0}
+            onClick={addCheckedToBoard}
+          >
+            <LayoutGrid className="size-3" />
+            加入选中 {checkedIds.size > 0 ? `(${checkedIds.size})` : ""}
+          </Button>
+        </div>
+      )}
+
       {/* 消息区 */}
       <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-3xl px-4 py-6">
@@ -157,7 +276,7 @@ export function ChatMain({ store, onOpenSettings, history, draft, onDraftConsume
                   isLast={i === messages.length - 1}
                   canRegenerate={!isStreaming}
                   onRegenerate={() =>
-                    activeConversation && regenerate(activeConversation)
+                    activeConversation && regenerate(activeConversation, m.id)
                   }
                   onBranch={() => {
                     if (!activeConversation) return
@@ -171,6 +290,13 @@ export function ChatMain({ store, onOpenSettings, history, draft, onDraftConsume
                   onToggleFavorite={() => {
                     if (!activeConversation) return
                     toggleFavorite(activeConversation.id, m.id)
+                  }}
+                  selectMode={selectMode}
+                  checked={checkedIds.has(m.id)}
+                  onToggleCheck={() => toggleCheck(m.id)}
+                  onAddToBoard={() => {
+                    if (!activeConversation) return
+                    addMessageToBoardSmart(activeConversation.id, m.id)
                   }}
                 />
               ))}
@@ -275,6 +401,19 @@ function EmptyState({ onPick }: { onPick: (text: string) => void }) {
   )
 }
 
+/** 勾选态小图标，用于多选模式下标识消息是否被选中 */
+function CheckMark({ checked, className }: { checked: boolean; className?: string }) {
+  return (
+    <span className={cn("shrink-0 text-primary", className)} aria-hidden>
+      {checked ? (
+        <SquareCheck className="size-4" />
+      ) : (
+        <Square className="size-4 text-muted-foreground" />
+      )}
+    </span>
+  )
+}
+
 function MessageBubble({
   message,
   isLast,
@@ -283,6 +422,10 @@ function MessageBubble({
   onBranch,
   favorited,
   onToggleFavorite,
+  onAddToBoard,
+  selectMode,
+  checked,
+  onToggleCheck,
 }: {
   message: Message
   isLast: boolean
@@ -291,6 +434,11 @@ function MessageBubble({
   onBranch: () => void
   favorited: boolean
   onToggleFavorite: () => void
+  onAddToBoard: () => void
+  /** 勾选模式：点击整条消息切换选中 */
+  selectMode: boolean
+  checked: boolean
+  onToggleCheck: () => void
 }) {
   const isUser = message.role === "user"
 
@@ -305,11 +453,22 @@ function MessageBubble({
 
   if (isUser) {
     return (
-      <div className="group/msg flex flex-col items-end" data-message-id={message.id}>
-        <div className="max-w-[85%]">
-          <div className="rounded-2xl rounded-br-md bg-secondary px-4 py-2.5 text-sm whitespace-pre-wrap break-words text-secondary-foreground">
-            {message.content}
+      <div
+        className={cn(
+          "group/msg flex flex-col items-end",
+          selectMode && "cursor-pointer rounded-xl px-2 py-1.5 transition-colors",
+          selectMode && (checked ? "bg-primary/10 ring-1 ring-primary/40" : "hover:bg-muted/60")
+        )}
+        data-message-id={message.id}
+        onClick={selectMode ? onToggleCheck : undefined}
+      >
+        <div className="flex max-w-[85%] items-start gap-2">
+          <div className="min-w-0 flex-1">
+            <div className="rounded-2xl rounded-br-md bg-secondary px-4 py-2.5 text-sm whitespace-pre-wrap break-words text-secondary-foreground">
+              {message.content}
+            </div>
           </div>
+          {selectMode && <CheckMark checked={checked} className="mt-2" />}
         </div>
         <div className="mt-1 flex justify-end gap-0.5 opacity-40 transition-opacity group-hover/msg:opacity-100 focus-within:opacity-100 has-[.fav-on]:opacity-100">
           <Button
@@ -326,6 +485,16 @@ function MessageBubble({
           >
             <Star className={cn("size-3", favorited && "fill-current")} />
             {favorited ? "已收藏" : "收藏"}
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-6 gap-1 px-1.5 text-[11px] text-muted-foreground hover:text-foreground"
+            onClick={onAddToBoard}
+            title="把这条消息放到画板"
+          >
+            <LayoutGrid className="size-3" />
+            加入画板
           </Button>
           <Button
             variant="ghost"
@@ -351,11 +520,23 @@ function MessageBubble({
   }
 
   return (
-    <div className="group/msg" data-message-id={message.id}>
+    <div
+      className={cn(
+        "group/msg",
+        selectMode && "cursor-pointer rounded-xl px-2 py-1.5 transition-colors",
+        selectMode && (checked ? "bg-primary/10 ring-1 ring-primary/40" : "hover:bg-muted/60")
+      )}
+      data-message-id={message.id}
+      onClick={selectMode ? onToggleCheck : undefined}
+    >
       <div className="mb-1.5 flex items-center gap-2">
-        <div className="flex size-5 items-center justify-center rounded-md bg-foreground text-[10px] font-bold text-background">
-          DS
-        </div>
+        {selectMode ? (
+          <CheckMark checked={checked} />
+        ) : (
+          <div className="flex size-5 items-center justify-center rounded-md bg-foreground text-[10px] font-bold text-background">
+            DS
+          </div>
+        )}
         <span className="text-xs font-medium text-muted-foreground">DeepSeek</span>
         {favorited && (
           <Star className="size-3 fill-current text-amber-500" />
@@ -408,6 +589,16 @@ function MessageBubble({
             >
               <Star className={cn("size-3", favorited && "fill-current")} />
               {favorited ? "已收藏" : "收藏"}
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 gap-1 px-1.5 text-[11px] text-muted-foreground hover:text-foreground"
+              onClick={onAddToBoard}
+              title="把这条消息放到画板"
+            >
+              <LayoutGrid className="size-3" />
+              加入画板
             </Button>
             <Button
               variant="ghost"
@@ -504,6 +695,8 @@ function Composer({
   history: import("@/components/prompt-history").PromptHistoryApi
 }) {
   const [value, setValue] = useState("")
+  // ref 必须在下面的 effect 使用前声明，否则读起来像是用了未来的变量
+  const taRef = useRef<HTMLTextAreaElement>(null)
 
   // 由历史面板填入的草稿
   useEffect(() => {
@@ -513,7 +706,6 @@ function Composer({
       requestAnimationFrame(() => taRef.current?.focus())
     }
   }, [draft, onDraftConsumed])
-  const taRef = useRef<HTMLTextAreaElement>(null)
 
   useEffect(() => {
     const el = taRef.current
