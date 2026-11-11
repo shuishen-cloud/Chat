@@ -29,10 +29,22 @@ export interface SelectionContext {
 }
 
 interface Props {
-  /** 当前选区；为 null 时隐藏气泡 */
-  selection: SelectionContext | null
+  /** 该悬浮窗固定的上下文（创建时锁定，不随选区变化） */
+  ctx: SelectionContext
+  /** 初始位置，通常取选区矩形 */
+  initialRect: { top: number; left: number; width: number; height: number }
+  /** 创建后自动展开（而非先显示气泡） */
+  autoOpen?: boolean
+  /** 序号，用于错位排布 */
+  index: number
   /** 点击气泡「收藏片段」时的回调 */
   onQuoteFavorite: (ctx: SelectionContext) => void
+  /** 关闭并移除该悬浮窗 */
+  onClose: () => void
+  /** 点气泡「追问」时通知外层升级为展开窗口 */
+  onAsk?: () => void
+  /** 仅作为气泡存在，不自行展开 */
+  bubbleOnly?: boolean
   store: ChatStore
 }
 
@@ -51,10 +63,21 @@ function clamp(v: number, min: number, max: number) {
  *  - 追问：展开可拖动/缩放的悬浮窗，就地提问（回答支持 Markdown）
  *  - 收藏：直接把选中片段加入收藏
  */
-export function SelectionQuickAsk({ selection, onQuoteFavorite, store }: Props) {
+export function SelectionQuickAsk({
+  ctx,
+  initialRect,
+  autoOpen = false,
+  index,
+  onQuoteFavorite,
+  onClose,
+  onAsk,
+  bubbleOnly = false,
+  store,
+}: Props) {
   const { state, branchFrom } = store
 
-  const [open, setOpen] = useState(false)
+  // 展开状态完全由外部 autoOpen 决定：同一选区升级为窗口时会换 key 重建
+  const open = autoOpen
   const [question, setQuestion] = useState("")
   const [askedQuestion, setAskedQuestion] = useState("")
   const [answer, setAnswer] = useState("")
@@ -74,46 +97,14 @@ export function SelectionQuickAsk({ selection, onQuoteFavorite, store }: Props) 
   /** 用户是否手动调整过，调整过则不再自动跟随选区 */
   const userAdjusted = useRef(false)
 
-  const openRef = useRef(open)
-  openRef.current = open
-
-  // 记住最近一次有效选区，避免点按钮时选区被清空导致内容丢失
-  const lastSelection = useRef<SelectionContext | null>(null)
-  if (selection) lastSelection.current = selection
-  const ctx = selection ?? (open ? lastSelection.current : null)
-
-  // 选区变化时重置
-  const sig = `${selection?.messageId ?? ""}::${selection?.text ?? ""}`
-  const prevSig = useRef(sig)
-  useEffect(() => {
-    if (prevSig.current === sig) return
-    prevSig.current = sig
-    // 只是选区被清空（点按钮导致），保持展开
-    if (!selection && openRef.current) return
-    setOpen(false)
-    setQuestion("")
-    setAskedQuestion("")
-    setAnswer("")
-    setError("")
-    setPhase("idle")
-    userAdjusted.current = false
-    abortRef.current?.abort()
-    abortRef.current = null
-  }, [sig, selection])
-
-  // 计算气泡锚点
+  // 计算气泡锚点（固定，不随选区变化）
   useLayoutEffect(() => {
-    if (!ctx) {
-      setAnchor(null)
-      return
-    }
-    const { rect } = ctx
     const vw = window.innerWidth
     setAnchor({
-      top: rect.top,
-      left: clamp(rect.left + rect.width / 2, 80, vw - 80),
+      top: initialRect.top,
+      left: clamp(initialRect.left + initialRect.width / 2, 80, vw - 80),
     })
-  }, [ctx])
+  }, [initialRect.top, initialRect.left, initialRect.width])
 
   // 展开时初始化悬浮窗位置（跟随选区，除非用户已手动调整）
   useLayoutEffect(() => {
@@ -123,21 +114,37 @@ export function SelectionQuickAsk({ selection, onQuoteFavorite, store }: Props) 
     const vh = window.innerHeight
     const w = 420
     const h = 460
-    const x = clamp(ctx.rect.left + ctx.rect.width / 2 - w / 2, 8, vw - w - 8)
-    const y = clamp(ctx.rect.top + 12, 8, vh - h - 8)
+    // 多个窗口依次错开 28px，避免完全重叠
+    const offset = (index % 5) * 28
+    const x = clamp(initialRect.left + initialRect.width / 2 - w / 2 + offset, 8, vw - w - 8)
+    const y = clamp(initialRect.top + 12 + offset, 8, vh - h - 8)
     setFrame({ x, y, w, h })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, ctx])
+  }, [open, index])
 
-  // 点击外部关闭
+  // 点击外部关闭：只有当点在「另一条消息/空白正文」时才关闭，
+  // 点侧边栏、收藏面板等辅助 UI 不应关掉悬浮窗。
   useEffect(() => {
-    if (!open) return
+    if (!open || bubbleOnly) return
     const onDown = (e: MouseEvent) => {
-      if (!boxRef.current?.contains(e.target as Node)) setOpen(false)
+      const target = e.target as HTMLElement | null
+      if (!target) return
+      if (boxRef.current?.contains(target)) return
+      // 辅助 UI（侧边栏/收藏面板/对话框/提示）与消息正文都不关闭，
+      // 便于一边选新文本开新窗、一边保留已有的悬浮窗。
+      const keep =
+        target.closest("[data-qa]") ||
+        target.closest("aside") ||
+        target.closest("[data-aux-panel]") ||
+        target.closest("[data-message-id]") ||
+        target.closest("[data-slot='dialog-content']") ||
+        target.closest("[data-sonner-toaster]")
+      if (keep) return
+      onClose()
     }
     document.addEventListener("mousedown", onDown)
     return () => document.removeEventListener("mousedown", onDown)
-  }, [open])
+  }, [open, onClose, bubbleOnly])
 
   /* ---------------- 拖动 ---------------- */
 
@@ -217,7 +224,7 @@ export function SelectionQuickAsk({ selection, onQuoteFavorite, store }: Props) 
   /* ---------------- 提问 ---------------- */
 
   const ask = useCallback(async () => {
-    if (!ctx || !question.trim() || phase === "asking") return
+    if (!question.trim() || phase === "asking") return
 
     const q = question.trim()
     setAskedQuestion(q)
@@ -263,7 +270,7 @@ export function SelectionQuickAsk({ selection, onQuoteFavorite, store }: Props) 
     } finally {
       abortRef.current = null
     }
-  }, [ctx, question, phase, state.apiKey, state.baseUrl, state.model])
+  }, [question, phase, state.apiKey, state.baseUrl, state.model])
 
   const stop = useCallback(() => {
     abortRef.current?.abort()
@@ -272,7 +279,7 @@ export function SelectionQuickAsk({ selection, onQuoteFavorite, store }: Props) 
 
   /** 存为当前对话的子对话（分支） */
   const saveAsBranch = useCallback(() => {
-    if (!ctx || !answer) return
+    if (!answer) return
     const id = branchFrom(ctx.conversationId, ctx.messageId, {
       append: [
         { role: "user", content: askedQuestion },
@@ -281,12 +288,12 @@ export function SelectionQuickAsk({ selection, onQuoteFavorite, store }: Props) 
       activate: true,
     })
     if (id) toast.success("已存为子对话")
-    setOpen(false)
-  }, [ctx, answer, askedQuestion, branchFrom])
+    onClose()
+  }, [ctx, answer, askedQuestion, branchFrom, onClose])
 
   /** 收藏这轮问答：收藏原消息，并把提问与回答写入备注 */
   const favoriteAnswer = useCallback(() => {
-    if (!ctx || !answer) return
+    if (!answer) return
     const existing = store.favoriteOf(ctx.conversationId, ctx.messageId)
     const prev = existing?.note?.trim()
     const note = [prev, `Q：${askedQuestion}`, `A：${answer.trim()}`]
@@ -294,15 +301,18 @@ export function SelectionQuickAsk({ selection, onQuoteFavorite, store }: Props) 
       .join("\n\n")
     store.favoriteWithNote(ctx.conversationId, ctx.messageId, note)
     toast.success("已收藏这轮问答")
-    setOpen(false)
-  }, [ctx, answer, askedQuestion, store])
+    onClose()
+  }, [ctx, answer, askedQuestion, store, onClose])
 
-  if (!ctx || !anchor) return null
+  if (!anchor) return null
 
   /* ---------------- 收起态：小气泡 ---------------- */
   if (!open) {
     return (
       <div
+        ref={boxRef}
+        data-qa="bubble"
+        data-qa-msg={ctx.messageId}
         className="fixed z-50 flex -translate-x-1/2 -translate-y-full items-center gap-0.5 rounded-lg border border-border bg-popover p-0.5 shadow-lg"
         style={{ top: anchor.top - 6, left: anchor.left }}
         onMouseDown={(e) => e.preventDefault()}
@@ -312,7 +322,10 @@ export function SelectionQuickAsk({ selection, onQuoteFavorite, store }: Props) 
           variant="ghost"
           className="h-6 gap-1 px-2 text-[11px]"
           onClick={() => {
-            setOpen(true)
+            if (bubbleOnly) {
+              onAsk?.()
+              return
+            }
             requestAnimationFrame(() => taRef.current?.focus())
           }}
         >
@@ -338,6 +351,8 @@ export function SelectionQuickAsk({ selection, onQuoteFavorite, store }: Props) 
   return (
     <div
       ref={boxRef}
+      data-qa="window"
+      data-qa-msg={ctx.messageId}
       className="fixed z-50 flex flex-col overflow-hidden rounded-xl border border-border bg-popover shadow-xl"
       style={{ left: frame.x, top: frame.y, width: frame.w, height: frame.h }}
     >
@@ -360,18 +375,16 @@ export function SelectionQuickAsk({ selection, onQuoteFavorite, store }: Props) 
           title="复位位置与大小"
           onClick={() => {
             userAdjusted.current = false
-            if (ctx) {
-              const vw = window.innerWidth
-              const vh = window.innerHeight
-              const w = 420
-              const h = 460
-              setFrame({
-                x: clamp(ctx.rect.left + ctx.rect.width / 2 - w / 2, 8, vw - w - 8),
-                y: clamp(ctx.rect.top + 12, 8, vh - h - 8),
-                w,
-                h,
-              })
-            }
+            const vw = window.innerWidth
+            const vh = window.innerHeight
+            const w = 420
+            const h = 460
+            setFrame({
+              x: clamp(initialRect.left + initialRect.width / 2 - w / 2, 8, vw - w - 8),
+              y: clamp(initialRect.top + 12, 8, vh - h - 8),
+              w,
+              h,
+            })
           }}
         >
           <Maximize2 className="size-3" />
@@ -380,7 +393,7 @@ export function SelectionQuickAsk({ selection, onQuoteFavorite, store }: Props) 
           size="icon"
           variant="ghost"
           className="size-5 shrink-0"
-          onClick={() => setOpen(false)}
+          onClick={onClose}
         >
           <X className="size-3" />
         </Button>
@@ -442,7 +455,7 @@ export function SelectionQuickAsk({ selection, onQuoteFavorite, store }: Props) 
               e.preventDefault()
               ask()
             }
-            if (e.key === "Escape") setOpen(false)
+            if (e.key === "Escape") onClose()
           }}
           placeholder="针对这段内容提问…（Enter 发送）"
           rows={2}

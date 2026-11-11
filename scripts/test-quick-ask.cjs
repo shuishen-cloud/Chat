@@ -1,0 +1,60 @@
+const { run } = require("./test-harness.cjs")
+
+run(async (t) => {
+  await t.mockReply("**回答**：Zustand 更轻量。\n\n- 无样板\n- 支持中间件")
+  await t.seed()
+
+  // ---------- 1. 气泡出现 ----------
+  await t.selectIn("m2")
+  t.ok((await t.count("div.fixed.z-50")) > 0, "选中后气泡出现")
+
+  // ---------- 2. 点追问 → 展开悬浮窗 ----------
+  await t.clickInFloat(/追问/)
+  await t.ok(
+    await t.until(async () => (await t.count("div.fixed.z-50.overflow-hidden")) === 1),
+    "展开为一个悬浮窗"
+  )
+
+  // ---------- 3. 打开收藏面板，悬浮窗不消失 ----------
+  await t.page.locator("aside").first().getByRole("button", { name: /^收藏$/ }).click()
+  await t.page.waitForTimeout(300)
+  t.eq(await t.count("div.fixed.z-50.overflow-hidden"), 1, "打开收藏面板后悬浮窗仍在")
+
+  // 关闭收藏面板
+  await t.page.keyboard.press("Escape")
+  await t.page.waitForTimeout(200)
+
+  // ---------- 4. 多悬浮窗 ----------
+  await t.selectIn("m1", 120)
+  t.ok((await t.count("div.fixed.z-50")) > 0, "第二个选区出现气泡")
+  await t.clickInFloat(/追问/)
+  t.ok(
+    await t.until(async () => (await t.count("div.fixed.z-50.overflow-hidden")) === 2),
+    "存在两个悬浮窗"
+  )
+
+  // 位置不重合
+  const boxes = await t.page.locator("div.fixed.z-50.overflow-hidden").evaluateAll(
+    els => els.map(e => { const r = e.getBoundingClientRect(); return {x:Math.round(r.x),y:Math.round(r.y)} })
+  )
+  t.ok(boxes[0].x !== boxes[1].x || boxes[0].y !== boxes[1].y, `两窗口错开 ${JSON.stringify(boxes)}`)
+
+  // ---------- 5. 各自独立提问 ----------
+  const wins = t.page.locator("div.fixed.z-50.overflow-hidden")
+  await wins.nth(0).locator("textarea").fill("第一个问题")
+  await wins.nth(0).locator("textarea").press("Enter")
+  await t.ok(await t.until(async () => (await wins.nth(0).locator("strong").count()) > 0), "窗口1 有 Markdown 回答")
+  t.eq(await wins.nth(1).locator("strong").count(), 0, "窗口2 不受影响")
+
+  await wins.nth(1).locator("textarea").fill("第二个问题")
+  await wins.nth(1).locator("textarea").press("Enter")
+  await t.ok(await t.until(async () => (await wins.nth(1).locator("strong").count()) > 0), "窗口2 也有回答")
+
+  await t.shot("multi")
+
+  // ---------- 6. 关闭其一，另一个保留 ----------
+  // 关闭按钮是标题栏最后一个（X）
+  await wins.nth(0).locator("div.cursor-grab button").last().click()
+  await t.until(async () => (await t.count("div.fixed.z-50.overflow-hidden")) === 1)
+  t.eq(await t.count("div.fixed.z-50.overflow-hidden"), 1, "关闭一个后剩一个")
+})
