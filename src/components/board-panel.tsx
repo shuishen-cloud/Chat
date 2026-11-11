@@ -70,6 +70,9 @@ export function BoardPanel({
     applyRun,
     restoreNodeContent,
     runningTaskId,
+    runEdge,
+    setNodeHue,
+    setEdgeHue,
   } = store
 
   const [selected, setSelected] = useState<string[]>([])
@@ -417,6 +420,10 @@ export function BoardPanel({
             onSaveContent={(id, text) => updateNode(id, { contentOverride: text })}
             onRestoreContent={restoreNodeContent}
             onApplyRun={applyRun}
+            onSetNodeHue={setNodeHue}
+            onSetEdgeHue={setEdgeHue}
+            onRunEdge={runEdge}
+            runningEdgeId={runningTaskId?.startsWith("edge:") ? runningTaskId : null}
             onMoveNode={moveNode}
             onConnect={connectNodes}
             onRemoveNode={(id) => {

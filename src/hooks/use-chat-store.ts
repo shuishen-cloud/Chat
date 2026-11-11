@@ -1085,6 +1085,34 @@ export function useChatStore() {
     }))
   }, [])
 
+  /* ---------------- 颜色标记 ---------------- */
+
+  const setNodeHue = useCallback((nodeId: string, hue: number | undefined) => {
+    setState((prev) => ({
+      ...prev,
+      boardNodes: prev.boardNodes.map((n) => (n.id === nodeId ? { ...n, hue } : n)),
+    }))
+  }, [])
+
+  const setEdgeHue = useCallback((edgeId: string, hue: number | undefined) => {
+    setState((prev) => ({
+      ...prev,
+      boardEdges: prev.boardEdges.map((e) => (e.id === edgeId ? { ...e, hue } : e)),
+    }))
+  }, [])
+
+  const setConversationHue = useCallback(
+    (conversationId: string, hue: number | undefined) => {
+      setState((prev) => ({
+        ...prev,
+        conversations: prev.conversations.map((c) =>
+          c.id === conversationId ? { ...c, hue } : c
+        ),
+      }))
+    },
+    []
+  )
+
   const setSidebarView = useCallback((view: ChatState["sidebarView"]) => {
     setState((prev) => ({ ...prev, sidebarView: view }))
   }, [])
@@ -1108,7 +1136,11 @@ export function useChatStore() {
 
   /* ---------------- 设置 ---------------- */
   const updateSettings = useCallback(
-    (patch: Partial<Pick<ChatState, "apiKey" | "baseUrl" | "model">>) => {
+    (
+      patch: Partial<
+        Pick<ChatState, "apiKey" | "baseUrl" | "model" | "thinkingEnabled">
+      >
+    ) => {
       setState((prev) => ({ ...prev, ...patch }))
     },
     []
@@ -1225,6 +1257,7 @@ export function useChatStore() {
           apiKey: state.apiKey,
           baseUrl: state.baseUrl,
           model: state.model,
+          thinkingEnabled: state.thinkingEnabled !== false,
           messages: [...history, newMessage("user", content)],
           signal: controller.signal,
           onDelta: (delta) => {
@@ -1285,6 +1318,7 @@ export function useChatStore() {
       state.apiKey,
       state.baseUrl,
       state.model,
+      state.thinkingEnabled,
       state.activeConversationId,
       state.activeProjectId,
       state.conversations,
@@ -1412,6 +1446,140 @@ export function useChatStore() {
    * 刻意不做拓扑串联：边是独立单元，一条失败不影响其他边，
    * 结果各自写回自己的终点节点。这样「只跑一条」和「跑多条」是同一套语义。
    */
+  /**
+   * 执行单条线（内部实现）。
+   *
+   * runEdge 与 runTask 都走这里，保证「单跑一条」与「任务里跑这条」行为完全一致。
+   * 返回值用来让调用方汇总成功/失败数量。
+   */
+  const execEdge = useCallback(
+    async (
+      edge: BoardEdge,
+      opts: {
+        signal: AbortSignal
+        writtenTargets: Set<string>
+      }
+    ): Promise<"ok" | "failed" | "aborted"> => {
+      const latest = stateRef.current
+      const source = latest.boardNodes.find((n) => n.id === edge.from)
+      const target = latest.boardNodes.find((n) => n.id === edge.to)
+      if (!source || !target) return "failed"
+
+      const inputText = resolveNodeText(source, latest.conversations)
+      if (!inputText.trim()) return "failed"
+
+      const prompt = (edge.prompt ?? "").trim()
+      const content = prompt
+        ? `【材料】\n${inputText}\n\n【要求】\n${prompt}`
+        : inputText
+
+      const runId = uid("run")
+      const snapshot = {
+        edgeId: edge.id,
+        prompt,
+        inputs: [
+          { nodeId: source.id, title: source.title || source.kind, text: inputText },
+        ],
+        createdAt: Date.now(),
+      }
+
+      try {
+        const result = await streamChat({
+          apiKey: latest.apiKey,
+          baseUrl: latest.baseUrl,
+          model: latest.model,
+          thinkingEnabled: latest.thinkingEnabled !== false,
+          messages: [{ id: runId, role: "user", content, createdAt: Date.now() }],
+          signal: opts.signal,
+          onDelta: () => {},
+        })
+
+        const run: NodeRun = { id: runId, ...snapshot, output: result.content }
+        const isFirstWrite = !opts.writtenTargets.has(target.id)
+        opts.writtenTargets.add(target.id)
+        setState((prev) => ({
+          ...prev,
+          boardNodes: prev.boardNodes.map((n) => {
+            if (n.id !== target.id) return n
+            const prevRuns = n.runs ?? []
+            // 同一节点被多条线写入时拼接，保留各自产出
+            const nextContent = isFirstWrite
+              ? result.content
+              : `${n.contentOverride ?? ""}\n\n---\n\n${
+                  prompt ? `**${prompt}**\n\n` : ""
+                }${result.content}`
+            return {
+              ...n,
+              contentOverride: nextContent,
+              runs: [run, ...prevRuns].slice(0, 50),
+            }
+          }),
+        }))
+        return "ok"
+      } catch (err) {
+        if ((err as Error)?.name === "AbortError") return "aborted"
+        const message = err instanceof Error ? err.message : String(err)
+        setState((prev) => ({
+          ...prev,
+          boardNodes: prev.boardNodes.map((n) => {
+            if (n.id !== target.id) return n
+            const run: NodeRun = { id: runId, ...snapshot, output: "", error: message }
+            return { ...n, runs: [run, ...(n.runs ?? [])].slice(0, 50) }
+          }),
+        }))
+        return "failed"
+      }
+    },
+    []
+  )
+
+  /** 准备工作：校验 Key、构造 controller */
+  const beginRun = useCallback((runId: string): AbortController | null => {
+    const latest = stateRef.current
+    if (!latest.apiKey.trim()) {
+      toast.error("请先在设置里填写 DeepSeek API Key", {
+        action: { label: "去设置", onClick: () => openSettingsRef.current?.() },
+      })
+      return null
+    }
+    const controller = new AbortController()
+    abortRef.current = controller
+    setRunningTaskId(runId)
+    return controller
+  }, [])
+
+  /**
+   * 直接执行单条线，无需创建任务。
+   * 快捷键 Enter / Ctrl+Enter 与边编辑器里的「立即执行」都调用它。
+   */
+  const runEdge = useCallback(
+    async (edgeId: string) => {
+      if (streamingConvId || runningTaskId) return
+      const edge = state.boardEdges.find((e) => e.id === edgeId)
+      if (!edge || !isRunnableEdge(edge)) {
+        toast.info("这条线不可执行（需要是「可执行」且未被禁用）")
+        return
+      }
+
+      const controller = beginRun(`edge:${edgeId}`)
+      if (!controller) return
+
+      try {
+        const r = await execEdge(edge, {
+          signal: controller.signal,
+          writtenTargets: new Set(),
+        })
+        if (r === "ok") toast.success("已执行这一条线")
+        else if (r === "aborted") toast.info("已停止")
+        else toast.error("执行失败，可到节点历史里查看原因")
+      } finally {
+        abortRef.current = null
+        setRunningTaskId(null)
+      }
+    },
+    [state.boardEdges, streamingConvId, runningTaskId, beginRun, execEdge]
+  )
+
   const runTask = useCallback(
     async (taskId: string) => {
       if (streamingConvId || runningTaskId) return
@@ -1427,21 +1595,12 @@ export function useChatStore() {
         return
       }
 
-      if (!state.apiKey.trim()) {
-        toast.error("请先在设置里填写 DeepSeek API Key", {
-          action: { label: "去设置", onClick: () => openSettingsRef.current?.() },
-        })
-        return
-      }
-
-      setRunningTaskId(taskId)
-      const controller = new AbortController()
-      abortRef.current = controller
+      const controller = beginRun(taskId)
+      if (!controller) return
 
       /**
        * 本次运行中已经向哪个节点写过结果。
-       * 多条线指向同一终点时（材料汇聚对比），结果要按顺序拼接而不是互相覆盖，
-       * 否则前一条线的产出会被后一条直接吃掉。
+       * 多条线指向同一终点时（材料汇聚对比），结果要按顺序拼接而不是互相覆盖。
        */
       const writtenTargets = new Set<string>()
 
@@ -1451,97 +1610,15 @@ export function useChatStore() {
 
       try {
         for (const edge of runnable) {
-          // 从最新 state 取节点：前一条线可能刚改写了某个节点
-          const latest = stateRef.current
-          const source = latest.boardNodes.find((n) => n.id === edge.from)
-          const target = latest.boardNodes.find((n) => n.id === edge.to)
-          if (!source || !target) {
-            failed++
-            continue
-          }
-
-          const inputText = resolveNodeText(source, latest.conversations)
-          if (!inputText.trim()) {
-            failed++
-            continue
-          }
-
-          const prompt = (edge.prompt ?? "").trim()
-          const content = prompt
-            ? `【材料】\n${inputText}\n\n【要求】\n${prompt}`
-            : inputText
-
-          const runId = uid("run")
-          const snapshot = {
-            edgeId: edge.id,
-            prompt,
-            inputs: [
-              {
-                nodeId: source.id,
-                title: source.title || source.kind,
-                text: inputText,
-              },
-            ],
-            createdAt: Date.now(),
-          }
-
-          try {
-            const result = await streamChat({
-              apiKey: state.apiKey,
-              baseUrl: state.baseUrl,
-              model: state.model,
-              messages: [{ id: runId, role: "user", content, createdAt: Date.now() }],
-              signal: controller.signal,
-              onDelta: () => {},
-            })
-
-            const run: NodeRun = {
-              id: runId,
-              ...snapshot,
-              output: result.content,
-            }
-            const isFirstWrite = !writtenTargets.has(target.id)
-            writtenTargets.add(target.id)
-            setState((prev) => ({
-              ...prev,
-              boardNodes: prev.boardNodes.map((n) => {
-                if (n.id !== target.id) return n
-                const prevRuns = n.runs ?? []
-                // 同一节点被多条线写入时，用分隔标记拼接，保留各自产出
-                const nextContent = isFirstWrite
-                  ? result.content
-                  : `${n.contentOverride ?? ""}\n\n---\n\n${
-                      prompt ? `**${prompt}**\n\n` : ""
-                    }${result.content}`
-                return {
-                  ...n,
-                  contentOverride: nextContent,
-                  runs: [run, ...prevRuns].slice(0, 50),
-                }
-              }),
-            }))
-            ok++
-          } catch (err) {
-            if ((err as Error)?.name === "AbortError") {
-              aborted = true
-              break
-            }
-            failed++
-            const message = err instanceof Error ? err.message : String(err)
-            setState((prev) => ({
-              ...prev,
-              boardNodes: prev.boardNodes.map((n) => {
-                if (n.id !== target.id) return n
-                const run: NodeRun = {
-                  id: runId,
-                  ...snapshot,
-                  output: "",
-                  error: message,
-                }
-                return { ...n, runs: [run, ...(n.runs ?? [])].slice(0, 50) }
-              }),
-            }))
-          }
+          const r = await execEdge(edge, {
+            signal: controller.signal,
+            writtenTargets,
+          })
+          if (r === "ok") ok++
+          else if (r === "aborted") {
+            aborted = true
+            break
+          } else failed++
         }
       } finally {
         abortRef.current = null
@@ -1561,13 +1638,10 @@ export function useChatStore() {
     [
       state.boardTasks,
       state.boardEdges,
-      state.boardNodes,
-      state.apiKey,
-      state.baseUrl,
-      state.model,
       streamingConvId,
       runningTaskId,
-      nodeText,
+      beginRun,
+      execEdge,
     ]
   )
 
@@ -1664,6 +1738,7 @@ export function useChatStore() {
     selectTask,
     toggleTaskEdge,
     runTask,
+    runEdge,
     stopTask,
     applyRun,
     restoreNodeContent,
@@ -1700,6 +1775,9 @@ export function useChatStore() {
     tagCounts,
     searchConversations,
     updateSettings,
+    setNodeHue,
+    setEdgeHue,
+    setConversationHue,
     setSidebarView,
     send,
     stop,

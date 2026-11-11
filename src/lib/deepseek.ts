@@ -5,6 +5,14 @@ export interface StreamOptions {
   baseUrl: string
   model: string
   messages: Message[]
+  /**
+   * 是否启用思考（思维链）。
+   *
+   * 保守实现：关闭时不向请求体附加任何非标参数，只是不再使用/展示 reasoning_content。
+   * 原因见 doc/feat/board-colors-and-run.md —— DeepSeek 未公开思考开关参数，
+   * 贸然发送未知字段可能导致整个请求被拒。
+   */
+  thinkingEnabled?: boolean
   signal?: AbortSignal
   onDelta: (delta: string) => void
   /** 思维链增量（deepseek-v4-pro 等推理模型） */
@@ -28,7 +36,16 @@ export interface StreamResult {
  * 调用 DeepSeek 的 OpenAI 兼容接口，按 SSE 解析增量
  */
 export async function streamChat(opts: StreamOptions): Promise<StreamResult> {
-  const { apiKey, baseUrl, model, messages, signal, onDelta, onReasoning } = opts
+  const {
+    apiKey,
+    baseUrl,
+    model,
+    messages,
+    thinkingEnabled = true,
+    signal,
+    onDelta,
+    onReasoning,
+  } = opts
 
   if (!apiKey.trim()) {
     throw new DeepSeekError("请先在「设置」中填写 DeepSeek API Key")
@@ -90,7 +107,10 @@ export async function streamChat(opts: StreamOptions): Promise<StreamResult> {
           const json = JSON.parse(payload)
           const choice = json?.choices?.[0]
           const content: string = choice?.delta?.content ?? ""
-          const reasoning: string = choice?.delta?.reasoning_content ?? ""
+          // 思考关闭时直接丢弃 reasoning_content，界面也就不会出现思维链
+          const reasoning: string = thinkingEnabled
+            ? (choice?.delta?.reasoning_content ?? "")
+            : ""
           if (reasoning) {
             fullReasoning += reasoning
             onReasoning?.(reasoning)

@@ -19,6 +19,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { DEFAULT_BASE_URL, DEFAULT_MODEL, MODELS } from "@/lib/types"
+import { cn } from "@/lib/utils"
 import type { ChatStore } from "@/hooks/use-chat-store"
 
 interface Props {
@@ -32,6 +33,7 @@ export function SettingsDialog({ open, onOpenChange, store }: Props) {
   const [apiKey, setApiKey] = useState(state.apiKey)
   const [baseUrl, setBaseUrl] = useState(state.baseUrl)
   const [model, setModel] = useState(state.model)
+  const [thinking, setThinking] = useState(state.thinkingEnabled !== false)
   const [showKey, setShowKey] = useState(false)
 
   useEffect(() => {
@@ -39,12 +41,13 @@ export function SettingsDialog({ open, onOpenChange, store }: Props) {
       setApiKey(state.apiKey)
       setBaseUrl(state.baseUrl)
       setModel(state.model)
+      setThinking(state.thinkingEnabled !== false)
       setShowKey(false)
     }
-  }, [open, state.apiKey, state.baseUrl, state.model])
+  }, [open, state.apiKey, state.baseUrl, state.model, state.thinkingEnabled])
 
   function save() {
-    updateSettings({ apiKey, baseUrl, model })
+    updateSettings({ apiKey, baseUrl, model, thinkingEnabled: thinking })
     onOpenChange(false)
   }
 
@@ -96,6 +99,32 @@ export function SettingsDialog({ open, onOpenChange, store }: Props) {
               去 DeepSeek 平台创建 Key
               <ExternalLink className="size-3" />
             </a>
+          </div>
+
+          <div className="flex items-start justify-between gap-3 rounded-lg border border-border p-3">
+            <div className="min-w-0">
+              <Label className="text-sm">思考模式</Label>
+              <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                关闭后不再显示思维链，请求也不会带上思考相关的非标参数。
+              </p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={thinking}
+              onClick={() => setThinking((v) => !v)}
+              className={cn(
+                "relative h-5 w-9 shrink-0 rounded-full transition-colors",
+                thinking ? "bg-primary" : "bg-muted"
+              )}
+            >
+              <span
+                className={cn(
+                  "absolute top-0.5 size-4 rounded-full bg-background transition-transform",
+                  thinking ? "translate-x-4.5" : "translate-x-0.5"
+                )}
+              />
+            </button>
           </div>
 
           <div className="flex flex-col gap-1.5">

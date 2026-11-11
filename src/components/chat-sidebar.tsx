@@ -18,9 +18,11 @@ import {
   List,
   ListTree,
   Settings,
+  Palette,
   Star,
   Trash2,
   X,
+  LayoutGrid,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -58,6 +60,9 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import type { BranchNode, ChatStore } from "@/hooks/use-chat-store"
 import type { Conversation } from "@/lib/types"
 import { cn } from "@/lib/utils"
+import { HuePicker } from "@/components/hue-picker"
+import { useIsDark } from "@/hooks/use-is-dark"
+import { hueBg, hueDot } from "@/lib/hue"
 
 interface Props {
   store: ChatStore
@@ -87,6 +92,7 @@ export function ChatSidebar({ store, onOpenSettings, onOpenFavorites }: Props) {
     togglePin,
     toggleArchive,
     unarchiveAll,
+    setConversationHue,
     duplicateConversation,
     state,
     setSidebarView,
@@ -101,6 +107,7 @@ export function ChatSidebar({ store, onOpenSettings, onOpenFavorites }: Props) {
   const [showArchived, setShowArchived] = useState(false)
   const [collapsedProjects, setCollapsedProjects] = useState<Set<string>>(new Set())
   const view = state.sidebarView
+  const dark = useIsDark()
 
   /** 搜索过滤：标题 + 消息正文 */
   const filtered = useMemo(() => {
@@ -164,13 +171,24 @@ export function ChatSidebar({ store, onOpenSettings, onOpenFavorites }: Props) {
             ? "bg-sidebar-accent text-sidebar-accent-foreground"
             : "hover:bg-sidebar-accent/60"
         )}
+        style={
+          c.hue !== undefined && !active
+            ? { backgroundColor: hueBg(c.hue, dark) }
+            : undefined
+        }
       >
         <button
           type="button"
           onClick={() => selectConversation(c.id)}
           className="flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-left text-sm"
         >
-          {c.pinned ? (
+          {c.hue !== undefined ? (
+            <span
+              className="size-2.5 shrink-0 rounded-full"
+              style={{ backgroundColor: hueDot(c.hue) }}
+              title="已标记颜色"
+            />
+          ) : c.pinned ? (
             <Pin className="size-3.5 shrink-0 fill-current text-muted-foreground" />
           ) : c.branchedFrom ? (
             <GitBranch className="size-3.5 shrink-0 text-muted-foreground" />
@@ -188,6 +206,8 @@ export function ChatSidebar({ store, onOpenSettings, onOpenFavorites }: Props) {
               <Button
                 variant="ghost"
                 size="icon"
+                aria-label="会话操作"
+                title="会话操作"
                 className="mr-1 size-6 shrink-0 opacity-0 group-hover/conv:opacity-100 data-popup-open:opacity-100"
               >
                 <MoreHorizontal className="size-3.5" />
@@ -216,6 +236,18 @@ export function ChatSidebar({ store, onOpenSettings, onOpenFavorites }: Props) {
               <Copy className="size-4" />
               创建副本
             </DropdownMenuItem>
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger className="gap-2">
+                <Palette className="size-4" />
+                标记颜色
+              </DropdownMenuSubTrigger>
+              <DropdownMenuSubContent className="p-2">
+                <HuePicker
+                  value={c.hue}
+                  onChange={(h) => setConversationHue(c.id, h)}
+                />
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
             <DropdownMenuSub>
               <DropdownMenuSubTrigger className="gap-2">
                 <FolderClosed className="size-4" />
@@ -399,6 +431,30 @@ export function ChatSidebar({ store, onOpenSettings, onOpenFavorites }: Props) {
             {favorites.length > 0 && (
               <span className="rounded-full bg-muted px-1.5 text-[10px] tabular-nums">
                 {favorites.length}
+              </span>
+            )}
+          </button>
+
+          {/* 画板入口 */}
+          <button
+            type="button"
+            onClick={() =>
+              store.activeBoard
+                ? store.setMainView(store.state.mainView === "board" ? "chat" : "board")
+                : store.addBoard()
+            }
+            className={cn(
+              "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground",
+              store.state.mainView === "board"
+                ? "bg-sidebar-accent/60 text-sidebar-accent-foreground"
+                : "text-muted-foreground"
+            )}
+          >
+            <LayoutGrid className="size-3.5 shrink-0" />
+            <span className="flex-1 text-left">画板</span>
+            {store.boardNodeEntries.length > 0 && store.state.mainView === "board" && (
+              <span className="rounded-full bg-muted px-1.5 text-[10px] tabular-nums">
+                {store.boardNodeEntries.length}
               </span>
             )}
           </button>

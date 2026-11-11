@@ -19,9 +19,13 @@ import {
 } from "@xyflow/react"
 import "@xyflow/react/dist/style.css"
 import {
+  AlertCircle,
+  ArrowDownToLine,
   Check,
   ChevronDown,
   ChevronUp,
+  Palette,
+  Play,
   ExternalLink,
   FileText,
   History,
@@ -34,8 +38,11 @@ import {
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Markdown } from "@/components/markdown"
+import { HuePicker } from "@/components/hue-picker"
+import { useIsDark } from "@/hooks/use-is-dark"
+import { hueBg, hueBorder, hueDot, hueStroke, hueText } from "@/lib/hue"
 import type { BoardNodeEntry } from "@/hooks/use-chat-store"
-import type { BoardEdge } from "@/lib/types"
+import type { BoardEdge, NodeRun } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
 /** 节点四向连接点 */
@@ -62,6 +69,10 @@ export type BoardNodeData = {
   onRestore: (id: string) => void
   /** 回填某条历史 */
   onApplyRun: (nodeId: string, runId: string) => void
+  /** 设置节点颜色 */
+  onSetHue: (nodeId: string, hue: number | undefined) => void
+  /** 当前是否暗色主题 */
+  dark: boolean
 }
 
 export type BoardCanvasProps = {
@@ -91,6 +102,12 @@ export type BoardCanvasProps = {
   onSaveContent: (nodeId: string, text: string) => void
   onRestoreContent: (nodeId: string) => void
   onApplyRun: (nodeId: string, runId: string) => void
+  onSetNodeHue: (nodeId: string, hue: number | undefined) => void
+  onSetEdgeHue: (edgeId: string, hue: number | undefined) => void
+  /** 立即执行单条线 */
+  onRunEdge: (edgeId: string) => void
+  /** 正在执行的线（用于按钮 loading/禁用） */
+  runningEdgeId: string | null
 }
 
 export function BoardCanvas(props: BoardCanvasProps) {
@@ -104,7 +121,10 @@ export function BoardCanvas(props: BoardCanvasProps) {
     onSaveContent,
     onRestoreContent,
     onApplyRun,
+    onSetNodeHue,
   } = props
+
+  const dark = useIsDark()
 
   const data = useMemo(
     () => ({
@@ -117,6 +137,8 @@ export function BoardCanvas(props: BoardCanvasProps) {
       onSaveContent,
       onRestore: onRestoreContent,
       onApplyRun,
+      onSetHue: onSetNodeHue,
+      dark,
     }),
     [
       onToggleExpand,
@@ -127,6 +149,8 @@ export function BoardCanvas(props: BoardCanvasProps) {
       onSaveContent,
       onRestoreContent,
       onApplyRun,
+      onSetNodeHue,
+      dark,
     ]
   )
 
@@ -165,7 +189,11 @@ function InnerFlow({
   onToggleEdgeKind,
   onToggleEdgeEnabled,
   onToggleTaskEdge,
+  onRunEdge,
+  onSetEdgeHue,
+  runningEdgeId,
 }: BoardCanvasProps & { nodes: Node<BoardNodeData>[] }) {
+  const dark = useIsDark()
   const nodeTypes = useMemo<NodeTypes>(
     () => ({ message: MessageNode, note: NoteNode }),
     []
@@ -293,10 +321,12 @@ function InnerFlow({
             selected && "board-edge-label-selected"
           ),
           markerEnd: { type: "arrowclosed" as const, width: 16, height: 16 },
+          // 有标记色时用色相覆盖默认主题色
+          style: e.hue !== undefined ? { stroke: hueStroke(e.hue, dark) } : undefined,
           data: { kind: e.kind },
         }
       }),
-    [edges, selectedEdgeIds, edgeSelectMode]
+    [edges, selectedEdgeIds, edgeSelectMode, dark]
   )
 
   const handleConnect = useCallback(
@@ -313,6 +343,14 @@ function InnerFlow({
   /** 点线：选边模式下加入任务，否则打开提示词编辑器 */
   const [editingEdgeId, setEditingEdgeId] = useState<string | null>(null)
 
+  /** 最近点选过的边：供 Enter 快捷键执行 */
+  const lastEdgeRef = useRef<string | null>(null)
+  /** 键盘监听里需要最新 onRunEdge，用 ref 避免反复解绑 */
+  const runEdgeRef = useRef(onRunEdge)
+  runEdgeRef.current = onRunEdge
+  /** 边编辑器打开时按 Esc 关闭 */
+  const closeEditor = useCallback(() => setEditingEdgeId(null), [])
+
   const handleEdgeClick = useCallback(
     (_: unknown, edge: Edge) => {
       const source = edges.find((e) => e.id === edge.id)
@@ -321,10 +359,48 @@ function InnerFlow({
         if (source?.kind === "flow") onToggleTaskEdge(edge.id)
         return
       }
+      lastEdgeRef.current = edge.id
       setEditingEdgeId(edge.id)
     },
     [edgeSelectMode, edges, onToggleTaskEdge]
   )
+
+  /*
+   * 键盘执行：选中一条线后按 Enter 或 Ctrl/Cmd+Enter 立即执行。
+   * 输入框/文本域内不拦截，避免影响边提示词编辑。
+   */
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const el = document.activeElement as HTMLElement | null
+      const tag = el?.tagName.toLowerCase()
+      const typing =
+        tag === "input" || tag === "textarea" || el?.isContentEditable === true
+
+      if (e.key === "Escape") {
+        if (editingEdgeId) {
+          closeEditor()
+          e.preventDefault()
+        }
+        return
+      }
+
+      if (e.key !== "Enter") return
+      const edgeId = lastEdgeRef.current
+      if (!edgeId) return
+
+      // 在编辑器里且非 Control/Cmd 时，走编辑器自己的保存逻辑
+      const withMod = e.metaKey || e.ctrlKey
+      if (typing && !withMod) return
+      if (!typing && !withMod) {
+        // 纯 Enter：仅当焦点不在输入框时执行，避免误触
+      }
+
+      e.preventDefault()
+      runEdgeRef.current?.(edgeId)
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [editingEdgeId, closeEditor])
 
   const editingEdge = edges.find((e) => e.id === editingEdgeId) ?? null
 
@@ -340,6 +416,7 @@ function InnerFlow({
         onNodeDragStop={handleDragStop}
         onConnect={handleConnect}
         onEdgeClick={handleEdgeClick}
+      onEdgeDoubleClick={(_, edge) => onRunEdge(edge.id)}
         onEdgesDelete={(removed) => removed.forEach((e) => onRemoveEdge(e.id))}
         onSelectionChange={handleSelectionChange}
         fitView
@@ -357,10 +434,13 @@ function InnerFlow({
       {editingEdge && (
         <EdgeEditor
           edge={editingEdge}
+          running={runningEdgeId === `edge:${editingEdge.id}`}
           onClose={() => setEditingEdgeId(null)}
           onUpdate={(patch) => onUpdateEdge(editingEdge.id, patch)}
           onToggleKind={() => onToggleEdgeKind(editingEdge.id)}
           onToggleEnabled={() => onToggleEdgeEnabled(editingEdge.id)}
+          onSetHue={(hue) => onSetEdgeHue(editingEdge.id, hue)}
+          onRun={() => onRunEdge(editingEdge.id)}
           onDelete={() => {
             onRemoveEdge(editingEdge.id)
             setEditingEdgeId(null)
@@ -376,17 +456,23 @@ function InnerFlow({
 
 function EdgeEditor({
   edge,
+  running,
   onClose,
   onUpdate,
   onToggleKind,
   onToggleEnabled,
+  onSetHue,
+  onRun,
   onDelete,
 }: {
   edge: BoardEdge
+  running: boolean
   onClose: () => void
   onUpdate: (patch: Partial<Pick<BoardEdge, "prompt">>) => void
   onToggleKind: () => void
   onToggleEnabled: () => void
+  onSetHue: (hue: number | undefined) => void
+  onRun: () => void
   onDelete: () => void
 }) {
   const [prompt, setPrompt] = useState(edge.prompt ?? "")
@@ -437,6 +523,11 @@ function EdgeEditor({
           </p>
         )}
 
+        <div className="mt-2.5 flex items-center gap-1.5">
+          <span className="text-[11px] text-muted-foreground">颜色</span>
+          <HuePicker value={edge.hue} onChange={onSetHue} />
+        </div>
+
         <div className="mt-3 flex items-center gap-1.5">
           <Button
             size="sm"
@@ -449,6 +540,23 @@ function EdgeEditor({
             <Check className="size-3" />
             保存
           </Button>
+          {runnable && edge.enabled !== false && (
+            <Button
+              variant="secondary"
+              size="sm"
+              className="h-7 gap-1 px-2 text-xs"
+              disabled={running}
+              onClick={() => {
+                // 先存下当前提示词，避免用户改了没保存就执行导致用的是旧值
+                onUpdate({ prompt })
+                onRun()
+              }}
+              title="立即执行这一条线（Ctrl/Cmd+Enter）"
+            >
+              <Play className="size-3" />
+              {running ? "执行中…" : "立即执行"}
+            </Button>
+          )}
           <Button
             variant="outline"
             size="sm"
@@ -521,6 +629,8 @@ function MessageNode({ data, selected }: NodeProps<Node<BoardNodeData>>) {
     onSaveContent,
     onRestore,
     onApplyRun,
+    onSetHue,
+    dark,
   } = data
   const { node, conversation, message, text } = entry
   const expanded = !!node.expanded
@@ -540,13 +650,19 @@ function MessageNode({ data, selected }: NodeProps<Node<BoardNodeData>>) {
 
   return (
     <div
-      style={sized ? { width: "100%", height: "100%" } : undefined}
       className={cn(
         "flex flex-col overflow-hidden rounded-xl border bg-card text-card-foreground shadow-sm transition-shadow",
         !sized && "w-[260px]",
-        selected ? "border-primary ring-2 ring-primary/30" : "border-border",
-        isUser && !overridden ? "bg-secondary/40" : "bg-card"
+        selected && "ring-2 ring-primary/30",
+        !selected && node.hue === undefined && "border-border",
+        isUser && !overridden && node.hue === undefined && "bg-secondary/40"
       )}
+      style={{
+        ...(node.hue !== undefined
+          ? { borderColor: hueBorder(node.hue, dark), backgroundColor: hueBg(node.hue, dark) }
+          : {}),
+        ...(sized ? { width: "100%", height: "100%" } : {}),
+      }}
     >
       <NodeResizer
         isVisible={selected}
@@ -570,6 +686,7 @@ function MessageNode({ data, selected }: NodeProps<Node<BoardNodeData>>) {
         <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">
           {node.title || conversation?.title || "来源对话"}
         </span>
+        <NodeHueButton hue={node.hue} onSet={(h) => onSetHue(node.id, h)} />
         {overridden && (
           <span className="shrink-0 rounded bg-amber-500/15 px-1 text-[9px] text-amber-600 dark:text-amber-400">
             已改写
@@ -699,54 +816,18 @@ function MessageNode({ data, selected }: NodeProps<Node<BoardNodeData>>) {
       )}
 
       {showHistory && runs.length > 0 && (
-        <div className="max-h-[240px] shrink-0 overflow-y-auto border-t border-border/60 bg-muted/40 p-1.5">
-          <div className="mb-1 flex items-center justify-between px-1">
-            <span className="text-[10px] font-medium text-muted-foreground">
-              运行历史 {runs.length}
-            </span>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="size-4"
-              onClick={() => setShowHistory(false)}
-            >
-              <X className="size-2.5" />
-            </Button>
-          </div>
-          {runs.map((r) => (
-            <div
-              key={r.id}
-              className="mb-1 rounded-md border border-border/60 bg-background/70 px-1.5 py-1"
-            >
-              <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
-                <span>{new Date(r.createdAt).toLocaleTimeString()}</span>
-                <span className="min-w-0 flex-1 truncate">
-                  {r.prompt || "无提示词"}
-                </span>
-                {!r.error && (
-                  <button
-                    type="button"
-                    className="shrink-0 rounded px-1 text-[10px] text-primary hover:underline"
-                    onClick={() => onApplyRun(node.id, r.id)}
-                    title="回填到当前内容"
-                  >
-                    回填
-                  </button>
-                )}
-              </div>
-              <div className="mt-0.5 line-clamp-3 text-[10px] break-words text-muted-foreground">
-                {r.error ? `失败：${r.error}` : r.output}
-              </div>
-            </div>
-          ))}
-        </div>
+        <HistoryList
+          runs={runs}
+          onApply={(runId) => onApplyRun(node.id, runId)}
+          onClose={() => setShowHistory(false)}
+        />
       )}
     </div>
   )
 }
 
 function NoteNode({ data, selected }: NodeProps<Node<BoardNodeData>>) {
-  const { entry, onRemove, onEditNote, onApplyRun, onResize } = data
+  const { entry, onRemove, onEditNote, onApplyRun, onResize, onSetHue, dark } = data
   const { node } = entry
   const sized = !!(node.width && node.height)
   const [showHistory, setShowHistory] = useState(false)
@@ -754,14 +835,25 @@ function NoteNode({ data, selected }: NodeProps<Node<BoardNodeData>>) {
 
   return (
     <div
-      style={sized ? { width: "100%", height: "100%" } : undefined}
       className={cn(
-        "flex flex-col overflow-hidden rounded-xl border bg-amber-50 text-amber-950 shadow-sm dark:bg-amber-950/30 dark:text-amber-100",
+        "flex flex-col overflow-hidden rounded-xl border shadow-sm",
         !sized && "w-[220px]",
-        selected
-          ? "border-amber-500 ring-2 ring-amber-500/30"
-          : "border-amber-300/70 dark:border-amber-800"
+        selected ? "ring-2 ring-amber-500/30" : "",
+        node.hue === undefined &&
+          "bg-amber-50 text-amber-950 dark:bg-amber-950/30 dark:text-amber-100",
+        node.hue === undefined &&
+          (selected ? "border-amber-500" : "border-amber-300/70 dark:border-amber-800")
       )}
+      style={{
+        ...(node.hue !== undefined
+          ? {
+              borderColor: hueBorder(node.hue, dark),
+              backgroundColor: hueBg(node.hue, dark),
+              color: hueText(node.hue, dark),
+            }
+          : {}),
+        ...(sized ? { width: "100%", height: "100%" } : {}),
+      }}
     >
       <NodeResizer
         isVisible={selected}
@@ -773,11 +865,12 @@ function NoteNode({ data, selected }: NodeProps<Node<BoardNodeData>>) {
       />
       <NodeHandles />
 
-      <div className="flex items-center gap-1.5 border-b border-amber-300/60 px-2.5 py-1.5 dark:border-amber-800/60">
+      <div className="flex items-center gap-1.5 border-b border-current/10 px-2.5 py-1.5">
         <FileText className="size-3 shrink-0 opacity-60" />
         <span className="min-w-0 flex-1 truncate text-[11px] font-medium">
           {node.title || "便签"}
         </span>
+        <NodeHueButton hue={node.hue} onSet={(h) => onSetHue(node.id, h)} />
         {runs.length > 0 && (
           <Button
             variant="ghost"
@@ -812,29 +905,197 @@ function NoteNode({ data, selected }: NodeProps<Node<BoardNodeData>>) {
       />
 
       {showHistory && runs.length > 0 && (
-        <div className="max-h-[200px] shrink-0 overflow-y-auto border-t border-amber-300/60 bg-amber-100/40 p-1.5 dark:border-amber-800/60 dark:bg-amber-950/40">
-          {runs.map((r) => (
-            <div key={r.id} className="mb-1 text-[10px]">
-              <div className="flex items-center gap-1 opacity-70">
-                <span>{new Date(r.createdAt).toLocaleTimeString()}</span>
-                <span className="min-w-0 flex-1 truncate">{r.prompt || "无提示词"}</span>
-                {!r.error && (
-                  <button
-                    type="button"
-                    className="shrink-0 rounded px-1 text-primary hover:underline"
-                    onClick={() => onApplyRun(node.id, r.id)}
-                  >
-                    回填
-                  </button>
-                )}
-              </div>
-              <div className="line-clamp-3 break-words opacity-80">
-                {r.error ? `失败：${r.error}` : r.output}
-              </div>
-            </div>
-          ))}
+        <HistoryList
+          runs={runs}
+          onApply={(runId) => onApplyRun(node.id, runId)}
+          onClose={() => setShowHistory(false)}
+        />
+      )}
+    </div>
+  )
+}
+
+/* ------------------------------------------------------------------ */
+/* 节点颜色入口：小色点，点开即选                                            */
+
+function NodeHueButton({
+  hue,
+  onSet,
+}: {
+  hue?: number
+  onSet: (hue: number | undefined) => void
+}) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="relative shrink-0">
+      <button
+        type="button"
+        title="标记颜色"
+        aria-label="标记颜色"
+        onClick={(e) => {
+          e.stopPropagation()
+          setOpen((v) => !v)
+        }}
+        className={cn(
+          "nodrag flex size-4 items-center justify-center rounded-full border transition-transform hover:scale-110",
+          hue === undefined ? "border-dashed border-muted-foreground/50" : "border-transparent"
+        )}
+        style={hue !== undefined ? { backgroundColor: hueDot(hue) } : undefined}
+      >
+        {hue === undefined && <Palette className="size-2.5 text-muted-foreground" />}
+      </button>
+      {open && (
+        <div className="nodrag absolute right-0 top-5 z-30 rounded-lg border border-border bg-card p-1.5 shadow-lg">
+          <HuePicker
+            value={hue}
+            onChange={(h) => {
+              onSet(h)
+              setOpen(false)
+            }}
+          />
         </div>
       )}
     </div>
   )
+}
+
+/* ------------------------------------------------------------------ */
+/* 运行历史：结构化卡片而非裸文本                                          */
+
+function HistoryList({
+  runs,
+  onApply,
+  onClose,
+}: {
+  runs: NodeRun[]
+  onApply: (runId: string) => void
+  onClose: () => void
+}) {
+  const [expanded, setExpanded] = useState<string | null>(null)
+
+  return (
+    <div
+      data-history
+      className="max-h-[260px] shrink-0 overflow-y-auto border-t border-current/10 bg-background/60 p-1.5 backdrop-blur-sm"
+    >
+      <div className="mb-1 flex items-center justify-between px-1">
+        <span className="text-[10px] font-medium text-muted-foreground">
+          运行历史 · {runs.length}
+        </span>
+        <Button variant="ghost" size="icon" className="size-4" onClick={onClose}>
+          <X className="size-2.5" />
+        </Button>
+      </div>
+
+      {runs.map((r) => {
+        const isOpen = expanded === r.id
+        const fail = !!r.error
+        return (
+          <div
+            key={r.id}
+            className={cn(
+              "mb-1 overflow-hidden rounded-lg border text-[10px]",
+              fail ? "border-destructive/40 bg-destructive/5" : "border-border/70 bg-card"
+            )}
+          >
+            <button
+              type="button"
+              className="flex w-full items-center gap-1 px-1.5 py-1 text-left transition-colors hover:bg-muted/50"
+              onClick={() => setExpanded(isOpen ? null : r.id)}
+            >
+              {fail ? (
+                <AlertCircle className="size-2.5 shrink-0 text-destructive" />
+              ) : (
+                <ArrowDownToLine className="size-2.5 shrink-0 text-muted-foreground" />
+              )}
+              <span className="shrink-0 tabular-nums text-muted-foreground">
+                {formatRunTime(r.createdAt)}
+              </span>
+              <span
+                className={cn(
+                  "min-w-0 flex-1 truncate font-medium",
+                  fail ? "text-destructive" : "text-foreground/80"
+                )}
+              >
+                {r.prompt || "无提示词"}
+              </span>
+              {!fail && (
+                <span
+                  role="button"
+                  tabIndex={0}
+                  className="shrink-0 rounded px-1 text-primary hover:underline"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onApply(r.id)
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.stopPropagation()
+                      onApply(r.id)
+                    }
+                  }}
+                >
+                  回填
+                </span>
+              )}
+            </button>
+
+            {isOpen ? (
+              <div className="space-y-1.5 border-t border-border/60 px-1.5 py-1.5">
+                {r.inputs.map((inp, i) => (
+                  <div key={i}>
+                    <div className="mb-0.5 text-[9px] font-medium text-muted-foreground">
+                      输入 · {inp.title}
+                    </div>
+                    <div className="max-h-24 overflow-y-auto whitespace-pre-wrap break-words rounded bg-muted/50 p-1 leading-relaxed">
+                      {inp.text}
+                    </div>
+                  </div>
+                ))}
+                <div>
+                  <div className="mb-0.5 text-[9px] font-medium text-muted-foreground">
+                    {fail ? "错误" : "输出"}
+                  </div>
+                  <div
+                    className={cn(
+                      "max-h-32 overflow-y-auto whitespace-pre-wrap break-words rounded p-1 leading-relaxed",
+                      fail ? "bg-destructive/10 text-destructive" : "bg-muted/50"
+                    )}
+                  >
+                    {r.error ?? r.output}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="px-1.5 pb-1">
+                <div
+                  className={cn(
+                    "line-clamp-2 break-words leading-relaxed",
+                    fail ? "text-destructive/90" : "text-muted-foreground"
+                  )}
+                >
+                  {r.error ?? r.output}
+                </div>
+                <div className="mt-0.5 text-[9px] text-muted-foreground/70">
+                  输入 {r.inputs.length} 项 · 点击展开
+                </div>
+              </div>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+/** 今天只显示时分秒，跨天补日期 */
+function formatRunTime(ts: number): string {
+  const d = new Date(ts)
+  const now = new Date()
+  const sameDay =
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate()
+  const hms = d.toLocaleTimeString()
+  return sameDay ? hms : `${d.getMonth() + 1}/${d.getDate()} ${hms.slice(0, 5)}`
 }

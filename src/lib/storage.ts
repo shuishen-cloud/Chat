@@ -32,6 +32,7 @@ const EMPTY: ChatState = {
   apiKey: "",
   baseUrl: DEFAULT_BASE_URL,
   model: DEFAULT_MODEL,
+  thinkingEnabled: true,
   sidebarView: "list",
 }
 
@@ -111,6 +112,8 @@ export function loadState(): ChatState {
     return {
       ...EMPTY,
       ...parsed,
+      // 老数据没有该字段，按「开启」处理，保持既有行为
+      thinkingEnabled: parsed.thinkingEnabled !== false,
       conversations: convs,
       favorites: valid,
       tags: parsed.tags ?? [],

@@ -50,6 +50,8 @@ export interface Conversation {
     conversationTitle: string
     messageId: string
   }
+  /** 颜色标记（色相值），用于侧边栏快速区分 */
+  hue?: number
   /** 置顶到列表顶部 */
   pinned?: boolean
   /** 已归档（从主列表折叠隐藏） */
@@ -101,6 +103,8 @@ export interface BoardNode {
   contentOverride?: string
   /** 运行历史，最新的在前 */
   runs?: NodeRun[]
+  /** 颜色标记（色相值） */
+  hue?: number
   createdAt: number
 }
 
@@ -134,6 +138,8 @@ export interface BoardEdge {
   /** 四向连接点标识，避免节点换边后连线错位 */
   sourceHandle?: string
   targetHandle?: string
+  /** 颜色标记（色相值） */
+  hue?: number
 }
 
 /**
@@ -176,6 +182,8 @@ export interface ChatState {
   apiKey: string
   baseUrl: string
   model: string
+  /** 是否展示/启用模型思考（思维链） */
+  thinkingEnabled: boolean
   sidebarView: SidebarView
 }
 
