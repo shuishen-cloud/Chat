@@ -6,6 +6,7 @@ import {
   createConversation,
   createProject,
   newMessage,
+  uid,
   type ChatState,
   type Conversation,
   type Message,
@@ -46,13 +47,51 @@ export function useChatStore() {
     [projects, state.activeProjectId]
   )
 
-  const projectConversations = useMemo(
-    () =>
-      state.conversations
-        .filter((c) => c.projectId === state.activeProjectId)
-        .sort((a, b) => b.updatedAt - a.updatedAt),
-    [state.conversations, state.activeProjectId]
+  const projectConversations = useMemo(() => {
+    const list = state.conversations.filter(
+      (c) => c.projectId === state.activeProjectId
+    )
+    // 置顶优先，组内按更新时间倒序
+    return list.sort((a, b) => {
+      if (!!a.pinned !== !!b.pinned) return a.pinned ? -1 : 1
+      return b.updatedAt - a.updatedAt
+    })
+  }, [state.conversations, state.activeProjectId])
+
+  /** 未归档的会话（主列表） */
+  const visibleConversations = useMemo(
+    () => projectConversations.filter((c) => !c.archived),
+    [projectConversations]
   )
+
+  /** 已归档的会话 */
+  const archivedConversations = useMemo(
+    () => projectConversations.filter((c) => c.archived),
+    [projectConversations]
+  )
+
+  /** 全部收藏消息（跟着会话走，已归档的也包含） */
+  const favorites = useMemo(() => {
+    const out: Array<{
+      message: Message
+      conversation: Conversation
+      project: Project | undefined
+    }> = []
+    for (const conv of state.conversations) {
+      for (const m of conv.messages) {
+        if (m.favorite) {
+          out.push({
+            message: m,
+            conversation: conv,
+            project: state.projects.find((p) => p.id === conv.projectId),
+          })
+        }
+      }
+    }
+    return out.sort(
+      (a, b) => (b.message.favoritedAt ?? 0) - (a.message.favoritedAt ?? 0)
+    )
+  }, [state.conversations, state.projects])
 
   const activeConversation = useMemo(
     () =>
@@ -180,6 +219,102 @@ export function useChatStore() {
       ),
     }))
   }, [])
+
+  const togglePin = useCallback((id: string) => {
+    setState((prev) => ({
+      ...prev,
+      conversations: prev.conversations.map((c) =>
+        c.id === id ? { ...c, pinned: !c.pinned } : c
+      ),
+    }))
+  }, [])
+
+  const toggleArchive = useCallback((id: string) => {
+    setState((prev) => ({
+      ...prev,
+      conversations: prev.conversations.map((c) =>
+        c.id === id ? { ...c, archived: !c.archived } : c
+      ),
+    }))
+  }, [])
+
+  /** 将全部已归档对话恢复 */
+  const unarchiveAll = useCallback((projectId: string) => {
+    setState((prev) => ({
+      ...prev,
+      conversations: prev.conversations.map((c) =>
+        c.projectId === projectId && c.archived ? { ...c, archived: false } : c
+      ),
+    }))
+  }, [])
+
+  /** 复制会话（含全部消息，重置分支来源） */
+  const duplicateConversation = useCallback((id: string) => {
+    setState((prev) => {
+      const src = prev.conversations.find((c) => c.id === id)
+      if (!src) return prev
+      const now = Date.now()
+      const copy = createConversation(src.projectId)
+      return {
+        ...prev,
+        conversations: [
+          ...prev.conversations,
+          {
+            ...copy,
+            title: `${src.title}（副本）`,
+            messages: src.messages.map((m) => ({
+              ...m,
+              id: uid("msg"),
+              streaming: false,
+            })),
+            createdAt: now,
+            updatedAt: now,
+          },
+        ],
+        activeProjectId: src.projectId,
+        activeConversationId: copy.id,
+      }
+    })
+  }, [])
+
+  /* ---------------- 收藏 ---------------- */
+
+  const toggleFavorite = useCallback((convId: string, messageId: string) => {
+    setState((prev) => ({
+      ...prev,
+      conversations: prev.conversations.map((c) =>
+        c.id === convId
+          ? {
+              ...c,
+              messages: c.messages.map((m) =>
+                m.id === messageId
+                  ? m.favorite
+                    ? { ...m, favorite: false, favoritedAt: undefined }
+                    : { ...m, favorite: true, favoritedAt: Date.now() }
+                  : m
+              ),
+            }
+          : c
+      ),
+    }))
+  }, [])
+
+  /* ---------------- 搜索 ---------------- */
+
+  /** 按标题与消息内容搜索当前项目下的对话 */
+  const searchConversations = useCallback(
+    (query: string): Conversation[] => {
+      const q = query.trim().toLowerCase()
+      if (!q) return []
+      return state.conversations.filter(
+        (c) =>
+          c.projectId === state.activeProjectId &&
+          (c.title.toLowerCase().includes(q) ||
+            c.messages.some((m) => m.content.toLowerCase().includes(q)))
+      )
+    },
+    [state.conversations, state.activeProjectId]
+  )
 
   /* ---------------- 设置 ---------------- */
 
@@ -382,6 +517,58 @@ export function useChatStore() {
     [send, streamingConvId]
   )
 
+  /**
+   * 从指定消息处分支出一个新对话（复制式分支）。
+   * 新对话包含该消息及其之前的全部历史，与源对话从此独立。
+   */
+  const branchFrom = useCallback(
+    (convId: string, messageId: string) => {
+      let newConvId: string | null = null
+
+      setState((prev) => {
+        const source = prev.conversations.find((c) => c.id === convId)
+        if (!source) return prev
+
+        const cutIndex = source.messages.findIndex((m) => m.id === messageId)
+        if (cutIndex === -1) return prev
+
+        const inherited = source.messages.slice(0, cutIndex + 1)
+        const now = Date.now()
+        const branch = createConversation(source.projectId)
+        newConvId = branch.id
+
+        return {
+          ...prev,
+          conversations: [
+            ...prev.conversations,
+            {
+              ...branch,
+              // 深拷贝并重新分配 id，避免分支间引用同一消息对象
+              messages: inherited.map((m) => ({
+                ...m,
+                id: uid("msg"),
+                streaming: false,
+              })),
+              title: `${source.title}（分支）`,
+              createdAt: now,
+              updatedAt: now,
+              branchedFrom: {
+                conversationId: source.id,
+                conversationTitle: source.title,
+                messageId,
+              },
+            },
+          ],
+          activeProjectId: source.projectId,
+          activeConversationId: branch.id,
+        }
+      })
+
+      return newConvId
+    },
+    []
+  )
+
   const exportMarkdown = useCallback((conv: Conversation) => {
     const md = conv.messages
       .filter((m) => m.content.trim())
@@ -403,6 +590,9 @@ export function useChatStore() {
     projects,
     activeProject,
     projectConversations,
+    visibleConversations,
+    archivedConversations,
+    favorites,
     activeConversation,
     streamingConvId,
     isStreaming: streamingConvId !== null,
@@ -416,10 +606,17 @@ export function useChatStore() {
     deleteConversation,
     clearConversation,
     moveConversation,
+    togglePin,
+    toggleArchive,
+    unarchiveAll,
+    duplicateConversation,
+    toggleFavorite,
+    searchConversations,
     updateSettings,
     send,
     stop,
     regenerate,
+    branchFrom,
     exportMarkdown,
   }
 }

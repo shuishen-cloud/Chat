@@ -7,9 +7,11 @@ import {
   Copy,
   Download,
   Eraser,
+  GitBranch,
   RefreshCw,
   Sparkles,
   Square,
+  Star,
   Trash2,
 } from "lucide-react"
 import { toast } from "sonner"
@@ -44,9 +46,12 @@ export function ChatMain({ store, onOpenSettings }: Props) {
     send,
     stop,
     regenerate,
+    branchFrom,
+    toggleFavorite,
     clearConversation,
     deleteConversation,
     exportMarkdown,
+    selectConversation,
   } = store
 
   const messages = activeConversation?.messages ?? []
@@ -115,6 +120,14 @@ export function ChatMain({ store, onOpenSettings }: Props) {
       {/* 消息区 */}
       <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-3xl px-4 py-6">
+          {activeConversation?.branchedFrom && (
+            <BranchBanner
+              from={activeConversation.branchedFrom}
+              onJump={() =>
+                selectConversation(activeConversation.branchedFrom!.conversationId)
+              }
+            />
+          )}
           {messages.length === 0 ? (
             <EmptyState onPick={(t) => send(t)} />
           ) : (
@@ -128,6 +141,15 @@ export function ChatMain({ store, onOpenSettings }: Props) {
                   onRegenerate={() =>
                     activeConversation && regenerate(activeConversation)
                   }
+                  onBranch={() => {
+                    if (!activeConversation) return
+                    branchFrom(activeConversation.id, m.id)
+                    toast.success("已创建分支对话")
+                  }}
+                  onToggleFavorite={() => {
+                    if (!activeConversation) return
+                    toggleFavorite(activeConversation.id, m.id)
+                  }}
                 />
               ))}
             </div>
@@ -151,6 +173,33 @@ export function ChatMain({ store, onOpenSettings }: Props) {
         </div>
       </div>
     </main>
+  )
+}
+
+/* ------------------------------------------------------------------ */
+
+function BranchBanner({
+  from,
+  onJump,
+}: {
+  from: { conversationTitle: string; conversationId: string }
+  onJump: () => void
+}) {
+  return (
+    <div className="mb-4 flex items-center gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+      <GitBranch className="size-3.5 shrink-0" />
+      <span className="min-w-0 flex-1 truncate">
+        分支自「{from.conversationTitle}」
+      </span>
+      <Button
+        variant="ghost"
+        size="sm"
+        className="h-6 shrink-0 px-2 text-xs"
+        onClick={onJump}
+      >
+        回到原对话
+      </Button>
+    </div>
   )
 }
 
@@ -193,11 +242,15 @@ function MessageBubble({
   isLast,
   canRegenerate,
   onRegenerate,
+  onBranch,
+  onToggleFavorite,
 }: {
   message: Message
   isLast: boolean
   canRegenerate: boolean
   onRegenerate: () => void
+  onBranch: () => void
+  onToggleFavorite: () => void
 }) {
   const isUser = message.role === "user"
 
@@ -217,7 +270,31 @@ function MessageBubble({
           <div className="rounded-2xl rounded-br-md bg-secondary px-4 py-2.5 text-sm whitespace-pre-wrap break-words text-secondary-foreground">
             {message.content}
           </div>
-          <div className="mt-1 flex justify-end opacity-0 transition-opacity group-hover/msg:opacity-100">
+          <div className="mt-1 flex justify-end gap-1 opacity-0 transition-opacity group-hover/msg:opacity-100 has-[.fav-on]:opacity-100">
+            <Button
+              variant="ghost"
+              size="sm"
+              className={cn(
+                "h-7 gap-1.5 px-2 text-xs",
+                message.favorite
+                  ? "fav-on text-amber-500 hover:text-amber-500"
+                  : "text-muted-foreground"
+              )}
+              onClick={onToggleFavorite}
+              title={message.favorite ? "取消收藏" : "收藏此消息"}
+            >
+              <Star className={cn("size-3", message.favorite && "fill-current")} />
+              {message.favorite ? "已收藏" : "收藏"}
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 gap-1.5 px-2 text-xs text-muted-foreground"
+              onClick={onBranch}
+            >
+              <GitBranch className="size-3" />
+              从这里分支
+            </Button>
             <Button
               variant="ghost"
               size="sm"
@@ -240,6 +317,9 @@ function MessageBubble({
           DS
         </div>
         <span className="text-xs font-medium text-muted-foreground">DeepSeek</span>
+        {message.favorite && (
+          <Star className="size-3 fill-current text-amber-500" />
+        )}
       </div>
 
       <div className="pl-7">
@@ -292,6 +372,18 @@ function MessageBubble({
               >
                 <RefreshCw className="size-3" />
                 重新生成
+              </Button>
+            )}
+            {canRegenerate && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 gap-1.5 px-2 text-xs text-muted-foreground"
+                onClick={onBranch}
+                title="从此处另开一个对话，包含到这里的全部历史"
+              >
+                <GitBranch className="size-3" />
+                从这里分支
               </Button>
             )}
           </div>

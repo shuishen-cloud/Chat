@@ -11,6 +11,10 @@ export interface Message {
   /** 请求失败时的错误信息 */
   error?: string
   createdAt: number
+  /** 是否已收藏 */
+  favorite?: boolean
+  /** 收藏时间，用于收藏面板排序 */
+  favoritedAt?: number
 }
 
 export interface Conversation {
@@ -20,6 +24,16 @@ export interface Conversation {
   messages: Message[]
   createdAt: number
   updatedAt: number
+  /** 分支来源：从哪个对话的哪条消息处分叉而来 */
+  branchedFrom?: {
+    conversationId: string
+    conversationTitle: string
+    messageId: string
+  }
+  /** 置顶到列表顶部 */
+  pinned?: boolean
+  /** 已归档（从主列表折叠隐藏） */
+  archived?: boolean
 }
 
 export interface Project {

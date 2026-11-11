@@ -31,3 +31,4 @@ dist-ssr
 # 测试产物
 playwright-report
 test-results
+.verify/

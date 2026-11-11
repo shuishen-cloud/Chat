@@ -5,6 +5,7 @@ import { TooltipProvider, Tooltip, TooltipContent, TooltipTrigger } from "@/comp
 import { ChatSidebar } from "@/components/chat-sidebar"
 import { ChatMain } from "@/components/chat-main"
 import { SettingsDialog } from "@/components/settings-dialog"
+import { FavoritesPanel } from "@/components/favorites-panel"
 import { Toaster } from "@/components/ui/sonner"
 import { useChatStore } from "@/hooks/use-chat-store"
 import { cn } from "@/lib/utils"
@@ -27,6 +28,7 @@ function useTheme() {
 export default function App() {
   const store = useChatStore()
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [favoritesOpen, setFavoritesOpen] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const { dark, toggle } = useTheme()
 
@@ -39,7 +41,11 @@ export default function App() {
             sidebarOpen ? "w-[280px]" : "w-0"
           )}
         >
-          <ChatSidebar store={store} onOpenSettings={() => setSettingsOpen(true)} />
+          <ChatSidebar
+            store={store}
+            onOpenSettings={() => setSettingsOpen(true)}
+            onOpenFavorites={() => setFavoritesOpen(true)}
+          />
         </div>
 
         <div className="flex min-w-0 flex-1 flex-col">
@@ -88,6 +94,11 @@ export default function App() {
         <SettingsDialog
           open={settingsOpen}
           onOpenChange={setSettingsOpen}
+          store={store}
+        />
+        <FavoritesPanel
+          open={favoritesOpen}
+          onOpenChange={setFavoritesOpen}
           store={store}
         />
         <Toaster position="top-center" richColors />

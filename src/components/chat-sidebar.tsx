@@ -1,14 +1,24 @@
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import {
+  Archive,
+  ArchiveRestore,
   Check,
+  ChevronRight,
+  Copy,
   FolderClosed,
   FolderPlus,
+  GitBranch,
   MessageSquare,
   MoreHorizontal,
   Pencil,
+  Pin,
+  PinOff,
   Plus,
+  Search,
   Settings,
+  Star,
   Trash2,
+  X,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -44,18 +54,24 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import type { ChatStore } from "@/hooks/use-chat-store"
+import type { Conversation } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
 interface Props {
   store: ChatStore
   onOpenSettings: () => void
+  onOpenFavorites: () => void
 }
 
-export function ChatSidebar({ store, onOpenSettings }: Props) {
+type Renaming = { kind: "project" | "conversation"; id: string; name: string }
+
+export function ChatSidebar({ store, onOpenSettings, onOpenFavorites }: Props) {
   const {
     projects,
     activeProject,
-    projectConversations,
+    visibleConversations,
+    archivedConversations,
+    favorites,
     activeConversation,
     addProject,
     renameProject,
@@ -66,14 +82,32 @@ export function ChatSidebar({ store, onOpenSettings }: Props) {
     renameConversation,
     deleteConversation,
     moveConversation,
+    togglePin,
+    toggleArchive,
+    unarchiveAll,
+    duplicateConversation,
   } = store
 
   const [newProjectOpen, setNewProjectOpen] = useState(false)
   const [newProjectName, setNewProjectName] = useState("")
-  const [renaming, setRenaming] = useState<
-    { kind: "project" | "conversation"; id: string; name: string } | null
-  >(null)
+  const [renaming, setRenaming] = useState<Renaming | null>(null)
   const [deletingProject, setDeletingProject] = useState<string | null>(null)
+  const [query, setQuery] = useState("")
+  const [showArchived, setShowArchived] = useState(false)
+
+  /** 搜索过滤：标题 + 消息正文 */
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    if (!q) return visibleConversations
+    return visibleConversations.filter(
+      (c) =>
+        c.title.toLowerCase().includes(q) ||
+        c.messages.some((m) => m.content.toLowerCase().includes(q))
+    )
+  }, [visibleConversations, query])
+
+  const pinnedList = filtered.filter((c) => c.pinned)
+  const normalList = filtered.filter((c) => !c.pinned)
 
   function submitNewProject(e: React.FormEvent) {
     e.preventDefault()
@@ -93,9 +127,114 @@ export function ChatSidebar({ store, onOpenSettings }: Props) {
     setRenaming(null)
   }
 
+  function renderConversation(c: Conversation, archived = false) {
+    const active = c.id === activeConversation?.id
+    return (
+      <div
+        key={c.id}
+        className={cn(
+          "group/conv relative flex items-center rounded-md transition-colors",
+          active
+            ? "bg-sidebar-accent text-sidebar-accent-foreground"
+            : "hover:bg-sidebar-accent/60"
+        )}
+      >
+        <button
+          type="button"
+          onClick={() => selectConversation(c.id)}
+          className="flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-left text-sm"
+        >
+          {c.pinned ? (
+            <Pin className="size-3.5 shrink-0 fill-current text-muted-foreground" />
+          ) : c.branchedFrom ? (
+            <GitBranch className="size-3.5 shrink-0 text-muted-foreground" />
+          ) : (
+            <MessageSquare className="size-3.5 shrink-0 text-muted-foreground" />
+          )}
+          <span className={cn("truncate", archived && "text-muted-foreground")}>
+            {c.title}
+          </span>
+        </button>
+
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="icon"
+                className="mr-1 size-6 shrink-0 opacity-0 group-hover/conv:opacity-100 data-popup-open:opacity-100"
+              >
+                <MoreHorizontal className="size-3.5" />
+              </Button>
+            }
+          />
+          <DropdownMenuContent align="end" className="w-48">
+            <DropdownMenuItem
+              onClick={() => togglePin(c.id)}
+              className="gap-2"
+            >
+              {c.pinned ? <PinOff className="size-4" /> : <Pin className="size-4" />}
+              {c.pinned ? "取消置顶" : "置顶"}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={() => setRenaming({ kind: "conversation", id: c.id, name: c.title })}
+              className="gap-2"
+            >
+              <Pencil className="size-4" />
+              重命名
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={() => duplicateConversation(c.id)}
+              className="gap-2"
+            >
+              <Copy className="size-4" />
+              创建副本
+            </DropdownMenuItem>
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger className="gap-2">
+                <FolderClosed className="size-4" />
+                移动到项目
+              </DropdownMenuSubTrigger>
+              <DropdownMenuSubContent className="w-48">
+                {projects.map((p) => (
+                  <DropdownMenuItem
+                    key={p.id}
+                    disabled={p.id === c.projectId}
+                    onClick={() => moveConversation(c.id, p.id)}
+                    className="gap-2"
+                  >
+                    <span className="flex-1 truncate">{p.name}</span>
+                    {p.id === c.projectId && <Check className="size-4" />}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
+            <DropdownMenuItem onClick={() => toggleArchive(c.id)} className="gap-2">
+              {archived ? (
+                <ArchiveRestore className="size-4" />
+              ) : (
+                <Archive className="size-4" />
+              )}
+              {archived ? "取消归档" : "归档"}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              variant="destructive"
+              onClick={() => deleteConversation(c.id)}
+              className="gap-2"
+            >
+              <Trash2 className="size-4" />
+              删除对话
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+    )
+  }
+
   return (
     <aside className="flex h-full w-[280px] shrink-0 flex-col border-r border-border bg-sidebar">
-      {/* 头部：项目切换 */}
+      {/* 项目切换 */}
       <div className="flex items-center gap-1 p-2">
         <DropdownMenu>
           <DropdownMenuTrigger
@@ -105,9 +244,7 @@ export function ChatSidebar({ store, onOpenSettings }: Props) {
                 className="h-9 min-w-0 flex-1 justify-start gap-2 px-2 font-medium"
               >
                 <FolderClosed className="size-4 shrink-0 text-muted-foreground" />
-                <span className="truncate">
-                  {activeProject?.name ?? "选择项目"}
-                </span>
+                <span className="truncate">{activeProject?.name ?? "选择项目"}</span>
               </Button>
             }
           />
@@ -133,7 +270,11 @@ export function ChatSidebar({ store, onOpenSettings }: Props) {
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
                   onClick={() =>
-                    setRenaming({ kind: "project", id: activeProject.id, name: activeProject.name })
+                    setRenaming({
+                      kind: "project",
+                      id: activeProject.id,
+                      name: activeProject.name,
+                    })
                   }
                   className="gap-2"
                 >
@@ -171,99 +312,108 @@ export function ChatSidebar({ store, onOpenSettings }: Props) {
         </Tooltip>
       </div>
 
+      {/* 搜索 */}
+      <div className="px-2 pb-2">
+        <div className="relative">
+          <Search className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="搜索对话与内容"
+            className="h-8 pl-7 text-xs"
+          />
+          {query && (
+            <button
+              type="button"
+              onClick={() => setQuery("")}
+              className="absolute top-1/2 right-1.5 -translate-y-1/2 rounded p-0.5 text-muted-foreground hover:text-foreground"
+            >
+              <X className="size-3" />
+            </button>
+          )}
+        </div>
+      </div>
+
       <Separator />
 
-      {/* 会话列表 */}
+      {/* 列表区 */}
       <ScrollArea className="min-h-0 flex-1">
         <div className="p-2">
-          <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground">
-            对话 · {projectConversations.length}
-          </div>
+          {/* 收藏入口 */}
+          <button
+            type="button"
+            onClick={onOpenFavorites}
+            className="mb-1 flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground"
+          >
+            <Star className="size-3.5 shrink-0" />
+            <span className="flex-1 text-left">收藏</span>
+            {favorites.length > 0 && (
+              <span className="rounded-full bg-muted px-1.5 text-[10px] tabular-nums">
+                {favorites.length}
+              </span>
+            )}
+          </button>
+
+          <Separator className="my-1.5" />
+
+          {/* 置顶 */}
+          {pinnedList.length > 0 && (
+            <>
+              <SectionLabel>置顶</SectionLabel>
+              <div className="mb-2 flex flex-col gap-0.5">
+                {pinnedList.map((c) => renderConversation(c))}
+              </div>
+            </>
+          )}
+
+          {/* 常规 */}
+          <SectionLabel>
+            对话 · {normalList.length}
+            {query && " (匹配)"}
+          </SectionLabel>
           <div className="flex flex-col gap-0.5">
-            {projectConversations.length === 0 && (
+            {normalList.length === 0 && (
               <div className="px-2 py-6 text-center text-xs text-muted-foreground">
-                还没有对话
+                {query ? "没有匹配的对话" : "还没有对话"}
               </div>
             )}
-            {projectConversations.map((c) => {
-              const active = c.id === activeConversation?.id
-              return (
-                <div
-                  key={c.id}
-                  className={cn(
-                    "group/conv relative flex items-center rounded-md transition-colors",
-                    active
-                      ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                      : "hover:bg-sidebar-accent/60"
-                  )}
-                >
-                  <button
-                    type="button"
-                    onClick={() => selectConversation(c.id)}
-                    className="flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-left text-sm"
-                  >
-                    <MessageSquare className="size-3.5 shrink-0 text-muted-foreground" />
-                    <span className="truncate">{c.title}</span>
-                  </button>
-
-                  <DropdownMenu>
-                    <DropdownMenuTrigger
-                      render={
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="mr-1 size-6 shrink-0 opacity-0 group-hover/conv:opacity-100 data-[popup-open]:opacity-100"
-                        >
-                          <MoreHorizontal className="size-3.5" />
-                        </Button>
-                      }
-                    />
-                    <DropdownMenuContent align="end" className="w-48">
-                      <DropdownMenuItem
-                        onClick={() =>
-                          setRenaming({ kind: "conversation", id: c.id, name: c.title })
-                        }
-                        className="gap-2"
-                      >
-                        <Pencil className="size-4" />
-                        重命名
-                      </DropdownMenuItem>
-                      <DropdownMenuSub>
-                        <DropdownMenuSubTrigger className="gap-2">
-                          <FolderClosed className="size-4" />
-                          移动到项目
-                        </DropdownMenuSubTrigger>
-                        <DropdownMenuSubContent className="w-48">
-                          {projects.map((p) => (
-                            <DropdownMenuItem
-                              key={p.id}
-                              disabled={p.id === c.projectId}
-                              onClick={() => moveConversation(c.id, p.id)}
-                              className="gap-2"
-                            >
-                              <span className="flex-1 truncate">{p.name}</span>
-                              {p.id === c.projectId && (
-                                <Check className="size-4" />
-                              )}
-                            </DropdownMenuItem>
-                          ))}
-                        </DropdownMenuSubContent>
-                      </DropdownMenuSub>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem
-                        variant="destructive"
-                        onClick={() => deleteConversation(c.id)}
-                        className="gap-2"
-                      >
-                        <Trash2 className="size-4" />
-                        删除对话
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
-              )
-            })}
+            {normalList.map((c) => renderConversation(c))}
           </div>
+
+          {/* 归档 */}
+          {archivedConversations.length > 0 && (
+            <div className="mt-2">
+              <button
+                type="button"
+                onClick={() => setShowArchived((v) => !v)}
+                className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-sidebar-accent/60"
+              >
+                <ChevronRight
+                  className={cn(
+                    "size-3 transition-transform",
+                    showArchived && "rotate-90"
+                  )}
+                />
+                已归档 · {archivedConversations.length}
+              </button>
+              {showArchived && (
+                <>
+                  <div className="flex flex-col gap-0.5">
+                    {archivedConversations.map((c) => renderConversation(c, true))}
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => unarchiveAll(activeProject?.id ?? "")}
+                    className="mt-1 h-7 w-full justify-start px-2 text-xs text-muted-foreground"
+                  >
+                    <ArchiveRestore className="size-3" />
+                    全部恢复
+                  </Button>
+                </>
+              )}
+            </div>
+          )}
         </div>
       </ScrollArea>
 
@@ -297,11 +447,7 @@ export function ChatSidebar({ store, onOpenSettings }: Props) {
               className="my-4"
             />
             <DialogFooter>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setNewProjectOpen(false)}
-              >
+              <Button type="button" variant="outline" onClick={() => setNewProjectOpen(false)}>
                 取消
               </Button>
               <Button type="submit">创建</Button>
@@ -315,7 +461,9 @@ export function ChatSidebar({ store, onOpenSettings }: Props) {
         <DialogContent className="sm:max-w-sm">
           <form onSubmit={submitRename}>
             <DialogHeader>
-              <DialogTitle>重命名</DialogTitle>
+              <DialogTitle>
+                {renaming?.kind === "project" ? "重命名项目" : "重命名对话"}
+              </DialogTitle>
             </DialogHeader>
             <Input
               autoFocus
@@ -326,11 +474,7 @@ export function ChatSidebar({ store, onOpenSettings }: Props) {
               className="my-4"
             />
             <DialogFooter>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setRenaming(null)}
-              >
+              <Button type="button" variant="outline" onClick={() => setRenaming(null)}>
                 取消
               </Button>
               <Button type="submit">保存</Button>
@@ -365,5 +509,13 @@ export function ChatSidebar({ store, onOpenSettings }: Props) {
         </AlertDialogContent>
       </AlertDialog>
     </aside>
+  )
+}
+
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground">
+      {children}
+    </div>
   )
 }
