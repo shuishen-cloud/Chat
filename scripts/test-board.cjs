@@ -1028,5 +1028,343 @@ cases.historyRendering = async (t) => {
   t.ok(/输入/.test(text), "含输入摘要标识")
 }
 
+/* ---------------- 便签显示产出 / 提示词色 / 悬浮编辑器 / 任务管理 ---------------- */
+
+/** 便签跑完后直接显示输出，而不只是躺在历史里 */
+cases.noteShowsOutput = async (t) => {
+  const now = Date.now()
+  await t.seed({
+    ...seedFlow(),
+    boardNodes: [
+      { id: "a", boardId: "b1", kind: "note", note: "材料A", x: 0, y: 0, createdAt: now },
+      {
+        id: "b",
+        boardId: "b1",
+        kind: "note",
+        note: "手写内容",
+        x: 400,
+        y: 0,
+        createdAt: now,
+        contentOverride: "执行产出的结果",
+        runs: [
+          {
+            id: "r1",
+            edgeId: "e1",
+            prompt: "处理",
+            inputs: [{ nodeId: "a", title: "材料A", text: "材料A" }],
+            output: "执行产出的结果",
+            createdAt: now,
+          },
+        ],
+      },
+    ],
+    boardEdges: [{ id: "e1", boardId: "b1", from: "a", to: "b", kind: "flow", prompt: "处理" }],
+    activeBoardId: "b1",
+    mainView: "board",
+  })
+
+  const note = t.page.locator(".react-flow__node[data-id='b']")
+  await note.waitFor({ state: "visible" })
+  // 不打开历史，正文里就应该能看到产出
+  t.eq(await note.locator("textarea").inputValue(), "执行产出的结果", "便签正文显示产出")
+  t.ok((await note.innerText()).includes("已产出"), "有「已产出」标记")
+
+  // 退回手写内容
+  await note.getByRole("button", { name: /退回手写内容/ }).click()
+  const s = await t.stateUntil(
+    (x) => x.boardNodes.find((n) => n.id === "b")?.contentOverride === undefined,
+    3000,
+    "已退回"
+  )
+  t.ok(true, "退回后 contentOverride 清空")
+  void s
+}
+
+/** 编辑便签正文写回同一字段，不会与产出打架 */
+cases.noteEditWritesSameField = async (t) => {
+  const now = Date.now()
+  await t.seed({
+    ...seedFlow(),
+    boardNodes: [
+      { id: "b", boardId: "b1", kind: "note", note: "", x: 0, y: 0, createdAt: now },
+    ],
+    boardEdges: [],
+    activeBoardId: "b1",
+    mainView: "board",
+  })
+
+  const ta = t.page.locator(".react-flow__node[data-id='b'] textarea")
+  await ta.waitFor({ state: "visible" })
+  await ta.fill("我手写的笔记")
+
+  const s = await t.stateUntil(
+    (x) => x.boardNodes[0]?.contentOverride === "我手写的笔记",
+    3000,
+    "写入 contentOverride"
+  )
+  t.eq(s.boardNodes[0].contentOverride, "我手写的笔记", "正文与产出共用字段")
+}
+
+/** 提示词颜色独立于线条颜色 */
+cases.promptHue = async (t) => {
+  await t.seed(seedFlow())
+  await t.untilVisible(".react-flow__edge-path")
+
+  await t.page.locator(".react-flow__edge-path").first().click({ force: true })
+  const box = t.page.getByPlaceholder("这条线要做什么？")
+  await box.waitFor({ state: "visible" })
+
+  // 「提示词色」那一行的色板
+  await t.page.locator("[data-hue='320']").last().click()
+
+  const s = await t.stateUntil(
+    (x) => x.boardEdges[0]?.promptHue === 320,
+    3000,
+    "提示词色已保存"
+  )
+  t.eq(s.boardEdges[0].promptHue, 320, "promptHue=320")
+  // 线条颜色不应被连带修改
+  t.ok(s.boardEdges[0].hue === undefined, "线条颜色未被改动")
+}
+
+/** 边编辑器是悬浮窗：不遮挡画布，点其他线能直接切换 */
+cases.edgeEditorIsFloating = async (t) => {
+  await t.seed(seedFlow())
+  await t.untilVisible(".react-flow__edge-path")
+
+  await t.page.locator(".react-flow__edge-path").first().click({ force: true })
+  await t.page.getByPlaceholder("这条线要做什么？").waitFor({ state: "visible" })
+
+  // 不应存在全屏遮罩（inset-0）
+  const fullOverlay = await t.page.locator("div.absolute.inset-0.z-20").count()
+  t.eq(fullOverlay, 0, "没有全屏遮罩")
+
+  // 画布节点仍然可点（证明没被遮住）
+  const node = t.page.locator(".react-flow__node[data-id='a']")
+  await node.click()
+  t.ok(true, "编辑器打开时仍可操作画布")
+}
+
+/** 任务可重命名、可删除 */
+cases.taskRenameAndDelete = async (t) => {
+  const now = Date.now()
+  await t.seed({
+    ...seedFlow(),
+    boardTasks: [
+      {
+        id: "t1",
+        boardId: "b1",
+        name: "旧任务名",
+        edgeIds: [],
+        createdAt: now,
+        updatedAt: now,
+      },
+    ],
+    activeTaskId: "t1",
+    mainView: "board",
+  })
+
+  // 重命名
+  await t.page.getByRole("button", { name: "旧任务名" }).click()
+  await t.page.getByRole("menuitem", { name: /重命名任务/ }).click()
+  const input = t.page.getByLabel("任务名称")
+  await input.waitFor({ state: "visible" })
+  await input.fill("新任务名")
+  await input.press("Enter")
+
+  const s1 = await t.stateUntil(
+    (x) => x.boardTasks[0]?.name === "新任务名",
+    3000,
+    "任务已重命名"
+  )
+  t.eq(s1.boardTasks[0].name, "新任务名", "名称已更新")
+
+  // 删除
+  await t.page.getByRole("button", { name: "新任务名" }).click()
+  await t.page.getByRole("menuitem", { name: /删除任务/ }).click()
+
+  const s2 = await t.stateUntil(
+    (x) => x.boardTasks.length === 0,
+    3000,
+    "任务已删除"
+  )
+  t.eq(s2.boardTasks.length, 0, "任务被删除")
+  t.eq(s2.activeTaskId, null, "activeTaskId 已清空")
+}
+
+/* ---------------- 便签 Markdown / 边动画 / 整边拖线 / 宽度（board-note-md-and-ux） ---------------- */
+
+/** 便签渲染 Markdown 而非原始符号 */
+cases.noteRendersMarkdown = async (t) => {
+  const now = Date.now()
+  await t.seed({
+    ...seedFlow(),
+    boardNodes: [
+      {
+        id: "b",
+        boardId: "b1",
+        kind: "note",
+        x: 0,
+        y: 0,
+        createdAt: now,
+        contentOverride: "## 小标题\n\n- 要点一\n- 要点二\n\n`code`",
+      },
+    ],
+    boardEdges: [],
+    activeBoardId: "b1",
+    mainView: "board",
+  })
+
+  const note = t.page.locator(".react-flow__node[data-id='b']")
+  await note.waitFor({ state: "visible" })
+
+  // 渲染态：存在 h2 / li，且不显示原始 ## 符号
+  t.eq(await note.locator("h2").count(), 1, "渲染出 h2")
+  t.eq(await note.locator("li").count(), 2, "渲染出两个列表项")
+  t.ok((await note.innerText()).includes("小标题"), "标题文字正确")
+  t.ok(!(await note.innerText()).includes("## 小标题"), "不显示原始 ## 符号")
+  // 默认是渲染态，不该直接出现 textarea
+  t.eq(await note.locator("textarea").count(), 0, "默认不在编辑态")
+}
+
+/** 点击进入编辑态，退出后内容保存 */
+cases.noteEditMode = async (t) => {
+  const now = Date.now()
+  await t.seed({
+    ...seedFlow(),
+    boardNodes: [
+      { id: "b", boardId: "b1", kind: "note", x: 0, y: 0, createdAt: now, contentOverride: "原始文本" },
+    ],
+    boardEdges: [],
+    activeBoardId: "b1",
+    mainView: "board",
+  })
+
+  const note = t.page.locator(".react-flow__node[data-id='b']")
+  await note.waitFor({ state: "visible" })
+
+  await note.getByText("原始文本").click()
+  const ta = note.locator("textarea")
+  await ta.waitFor({ state: "visible" })
+  t.eq(await ta.inputValue(), "原始文本", "编辑态带出原文")
+
+  await ta.fill("## 改后的标题")
+  await t.page.keyboard.press("Escape")
+
+  await t.stateUntil(
+    (x) => x.boardNodes[0]?.contentOverride === "## 改后的标题",
+    3000,
+    "内容已保存"
+  )
+  // 退出编辑后应回到渲染态
+  t.eq(await note.locator("textarea").count(), 0, "已回到渲染态")
+  t.eq(await note.locator("h2").count(), 1, "改后的 Markdown 生效")
+}
+
+/** 执行中该边带 executing 类 */
+cases.edgeExecutingAnimation = async (t) => {
+  const seed = seedFlow()
+  seed.boardEdges[0].prompt = "慢慢返回"
+  await t.seed(seed)
+
+  // 让响应延迟，便于观察执行中状态
+  await t.page.unroute("**/chat/completions").catch(() => {})
+  await t.page.route("**/chat/completions", async (route) => {
+    await new Promise((r) => setTimeout(r, 1200))
+    route.fulfill({
+      status: 200,
+      headers: { "content-type": "text/event-stream" },
+      body:
+        `data: ${JSON.stringify({ choices: [{ delta: { content: "慢输出" } }] })}\n\n` +
+        `data: [DONE]\n\n`,
+    })
+  })
+
+  await t.page.locator(".react-flow__edge-path").first().click({ force: true })
+  await t.page.getByRole("button", { name: /立即执行/ }).click()
+
+  const got = await t.until(
+    async () => (await t.count(".react-flow__edge.board-edge-executing")) === 1,
+    3000
+  )
+  t.ok(got, "执行期间边上出现 executing 动画标记")
+
+  // 结束后动画消失
+  await t.untilState(
+    (x) => (x.boardNodes.find((n) => n.id === "b")?.runs?.length ?? 0) === 1,
+    8000
+  )
+  const cleared = await t.until(
+    async () => (await t.count(".react-flow__edge.board-edge-executing")) === 0,
+    4000
+  )
+  t.ok(cleared, "结束后动画移除")
+}
+
+/** 从节点边沿（非手柄点）拖动也能连线 */
+cases.connectFromEdges = async (t) => {
+  const now = Date.now()
+  await t.seed({
+    ...seedFlow(),
+    boardNodes: [
+      { id: "a", boardId: "b1", kind: "note", note: "甲", x: 0, y: 0, createdAt: now },
+      { id: "b", boardId: "b1", kind: "note", note: "乙", x: 420, y: 240, createdAt: now },
+    ],
+    boardEdges: [],
+    activeBoardId: "b1",
+    mainView: "board",
+  })
+  await t.untilVisible(".react-flow__node[data-id='a']")
+
+  const box = await t.page.locator(".react-flow__node[data-id='a']").boundingBox()
+  // 从节点右边缘中部（手柄之外的区域）开始拖
+  await t.page.mouse.move(box.x + box.width - 3, box.y + box.height / 2)
+  await t.page.mouse.down()
+  await t.page.mouse.move(box.x + box.width + 200, box.y + box.height + 120, { steps: 12 })
+  const target = await t.page.locator(".react-flow__node[data-id='b']").boundingBox()
+  await t.page.mouse.move(target.x + 20, target.y + target.height / 2, { steps: 12 })
+  await t.page.mouse.up()
+
+  const s = await t.stateUntil((x) => x.boardEdges.length === 1, 4000, "从边沿拉出连线")
+  t.eq(s.boardEdges[0].from, "a", "起点正确")
+  t.eq(s.boardEdges[0].to, "b", "终点正确")
+}
+
+/** 画板宽度可拖拽调整并持久化 */
+cases.boardWidthResize = async (t) => {
+  await t.seed(seedFlow())
+  await t.untilVisible(".react-flow")
+
+  const board = t.page.locator("[data-board-panel]")
+  const before = (await board.boundingBox()).width
+
+  const handle = t.page.locator("[data-board-resizer]")
+  const hb = await handle.boundingBox()
+  await t.page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2)
+  await t.page.mouse.down()
+  await t.page.mouse.move(hb.x - 180, hb.y + hb.height / 2, { steps: 10 })
+  await t.page.mouse.up()
+
+  const after = (await board.boundingBox()).width
+  t.ok(after > before + 80, `宽度变大 (${Math.round(before)} -> ${Math.round(after)})`)
+
+  // 持久化：刷新后仍然生效
+  const saved = await t.page.evaluate(() => localStorage.getItem("shadcn-chat/board-width"))
+  t.ok(saved !== null, "宽度已写入 localStorage")
+}
+
+/** 最大化按钮把画板拉到上限 */
+cases.boardMaximize = async (t) => {
+  await t.seed(seedFlow())
+  await t.untilVisible(".react-flow")
+  const board = t.page.locator("[data-board-panel]")
+  const before = (await board.boundingBox()).width
+
+  await t.page.getByRole("button", { name: /最大化画板|还原画板宽度/ }).click()
+  await t.page.waitForTimeout(300)
+  const after = (await board.boundingBox()).width
+  t.ok(after > before, `点击后变宽 (${Math.round(before)} -> ${Math.round(after)})`)
+}
+
 runAll(cases)
 console.log("URL:", URL)
