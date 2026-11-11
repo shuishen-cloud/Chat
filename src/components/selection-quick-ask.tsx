@@ -5,7 +5,6 @@ import {
   GripHorizontal,
   Loader2,
   Maximize2,
-  Minimize2,
   Quote,
   Square,
   Star,
@@ -46,6 +45,8 @@ interface Props {
   onAsk?: () => void
   /** 仅作为气泡存在，不自行展开 */
   bubbleOnly?: boolean
+  /** 提示词历史 */
+  history: import("@/components/prompt-history").PromptHistoryApi
   store: ChatStore
 }
 
@@ -53,8 +54,7 @@ type Phase = "idle" | "asking" | "answered" | "error"
 
 const MIN_W = 320
 const MIN_H = 220
-/** 大对话模式距视口边缘的留白 */
-const EXPAND_MARGIN = 24
+
 
 /** 限制在视口内 */
 function clamp(v: number, min: number, max: number) {
@@ -75,6 +75,7 @@ export function SelectionQuickAsk({
   onClose,
   onAsk,
   bubbleOnly = false,
+  history,
   store,
 }: Props) {
   const { state, branchFrom } = store
@@ -100,10 +101,7 @@ export function SelectionQuickAsk({
   /** 用户是否手动调整过，调整过则不再自动跟随选区 */
   const userAdjusted = useRef(false)
 
-  /** 是否展开为大对话（占满视口） */
-  const [expanded, setExpanded] = useState(false)
-  /** 展开前的尺寸，用于返回原浮窗 */
-  const beforeExpand = useRef<{ x: number; y: number; w: number; h: number } | null>(null)
+
 
   // 计算气泡锚点（固定，不随选区变化）
   useLayoutEffect(() => {
@@ -236,6 +234,7 @@ export function SelectionQuickAsk({
     if (!question.trim() || phase === "asking") return
 
     const q = question.trim()
+    history.record(q, "quickask")
     setAskedQuestion(q)
     setQuestion("")
     setPhase("asking")
@@ -300,6 +299,29 @@ export function SelectionQuickAsk({
     onClose()
   }, [ctx, answer, askedQuestion, branchFrom, onClose])
 
+  /**
+   * 放大：把本轮问答落成一条正式对话并跳转过去。
+   * 未提问时退化为「从该消息处分支」。
+   */
+  const openAsConversation = useCallback(() => {
+    const hasQA = !!(askedQuestion && answer)
+    const id = branchFrom(ctx.conversationId, ctx.messageId, {
+      append: hasQA
+        ? [
+            { role: "user", content: askedQuestion },
+            { role: "assistant", content: answer },
+          ]
+        : undefined,
+      title: hasQA ? undefined : `${ctx.text.slice(0, 16)}（追问）`,
+      activate: true,
+    })
+    if (!id) return
+    toast.success(hasQA ? "已展开为对话" : "已从该处开启对话", {
+      description: "可在侧边栏找到，支持继续追问与分支",
+    })
+    onClose()
+  }, [ctx, askedQuestion, answer, branchFrom, onClose])
+
   /** 收藏这轮问答：收藏原消息，并把提问与回答写入备注 */
   const favoriteAnswer = useCallback(() => {
     if (!answer) return
@@ -363,63 +385,30 @@ export function SelectionQuickAsk({
       data-qa="window"
       data-qa-msg={ctx.messageId}
       className="fixed z-50 flex flex-col overflow-hidden rounded-xl border border-border bg-popover shadow-xl"
-      style={
-        expanded
-          ? { left: EXPAND_MARGIN, top: EXPAND_MARGIN,
-              width: `calc(100vw - ${EXPAND_MARGIN * 2}px)`,
-              height: `calc(100vh - ${EXPAND_MARGIN * 2}px)` }
-          : { left: frame.x, top: frame.y, width: frame.w, height: frame.h }
-      }
+      style={{ left: frame.x, top: frame.y, width: frame.w, height: frame.h }}
     >
       {/* 标题栏（拖动区） */}
       <div
-        className={cn(
-          "flex shrink-0 items-center gap-1.5 border-b border-border px-2 py-1.5",
-          expanded
-            ? ""
-            : "cursor-grab touch-none active:cursor-grabbing"
-        )}
-        onPointerDown={expanded ? undefined : onHeaderPointerDown}
-        onPointerMove={expanded ? undefined : onHeaderPointerMove}
-        onPointerUp={expanded ? undefined : onHeaderPointerUp}
-        onPointerCancel={expanded ? undefined : onHeaderPointerUp}
+        className="flex shrink-0 cursor-grab touch-none items-center gap-1.5 border-b border-border px-2 py-1.5 active:cursor-grabbing"
+        onPointerDown={onHeaderPointerDown}
+        onPointerMove={onHeaderPointerMove}
+        onPointerUp={onHeaderPointerUp}
+        onPointerCancel={onHeaderPointerUp}
       >
-        {expanded ? (
-          <Quote className="size-3.5 shrink-0 text-muted-foreground/60" />
-        ) : (
-          <GripHorizontal className="size-3.5 shrink-0 text-muted-foreground/60" />
-        )}
+        <GripHorizontal className="size-3.5 shrink-0 text-muted-foreground/60" />
         <span className="flex-1 truncate text-[11px] font-medium text-muted-foreground select-none">
-          {expanded ? "大对话" : "基于所选内容追问"}
+          基于所选内容追问
         </span>
-        {expanded ? (
-          <Button
-            size="sm"
-            variant="ghost"
-            className="h-5 shrink-0 gap-1 px-1.5 text-[11px] text-muted-foreground"
-            title="收回到悬浮窗"
-            onClick={() => {
-              setExpanded(false)
-              if (beforeExpand.current) setFrame(beforeExpand.current)
-            }}
-          >
-            <Minimize2 className="size-3" />
-            返回浮窗
-          </Button>
-        ) : (
-          <Button
-            size="icon"
-            variant="ghost"
-            className="size-5 shrink-0"
-            title="展开为大对话"
-            onClick={() => {
-              beforeExpand.current = frame
-              setExpanded(true)
-            }}
-          >
-            <Maximize2 className="size-3" />
-          </Button>
-        )}
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-5 shrink-0 gap-1 px-1.5 text-[11px] text-muted-foreground"
+          title="展开为正式对话（可在侧边栏继续）"
+          onClick={openAsConversation}
+        >
+          <Maximize2 className="size-3" />
+          展开为对话
+        </Button>
         <Button
           size="icon"
           variant="ghost"
@@ -431,27 +420,13 @@ export function SelectionQuickAsk({
       </div>
 
       {/* 引用片段 */}
-      <div
-        className={cn(
-          "shrink-0 overflow-y-auto border-b border-border bg-muted/50 text-[11px] leading-relaxed whitespace-pre-wrap text-muted-foreground",
-          expanded ? "max-h-24 px-8 py-2" : "max-h-16 px-2.5 py-1.5"
-        )}
-      >
-        <div className={cn(expanded && "mx-auto w-full max-w-3xl")}>
-          {ctx.text.length > (expanded ? 800 : 300)
-            ? `${ctx.text.slice(0, expanded ? 800 : 300)}…`
-            : ctx.text}
-        </div>
+      <div className="max-h-16 shrink-0 overflow-y-auto border-b border-border bg-muted/50 px-2.5 py-1.5 text-[11px] leading-relaxed whitespace-pre-wrap text-muted-foreground">
+        {ctx.text.length > 300 ? `${ctx.text.slice(0, 300)}…` : ctx.text}
       </div>
 
       {/* 对话区（占满剩余空间） */}
-      <div
-        className={cn(
-          "min-h-0 flex-1 overflow-y-auto px-2.5 py-2",
-          expanded && "px-8 py-5"
-        )}
-      >
-        <div className={cn(expanded && "mx-auto w-full max-w-3xl")}>
+      <div className="min-h-0 flex-1 overflow-y-auto px-2.5 py-2">
+        <div>
         {!askedQuestion && phase === "idle" ? (
           <div className="flex h-full flex-col items-center justify-center gap-1 text-center text-[11px] text-muted-foreground">
             <Quote className="size-4 opacity-40" />
@@ -492,8 +467,8 @@ export function SelectionQuickAsk({
       </div>
 
       {/* 输入区 */}
-      <div className={cn("shrink-0 border-t border-border p-2", expanded && "px-8 py-3")}>
-        <div className={cn(expanded && "mx-auto w-full max-w-3xl")}>
+      <div className="shrink-0 border-t border-border p-2">
+        <div>
         <Textarea
           ref={taRef}
           value={question}
@@ -549,8 +524,7 @@ export function SelectionQuickAsk({
         </div>
       </div>
 
-      {/* 缩放手柄（展开态隐藏） */}
-      {!expanded && (
+      {/* 缩放手柄 */}
       <div
         className={cn(
           "absolute right-0 bottom-0 size-4 cursor-nwse-resize touch-none",
@@ -562,7 +536,6 @@ export function SelectionQuickAsk({
         onPointerCancel={onResizeUp}
         title="拖动调整大小"
       />
-      )}
     </div>
   )
 }

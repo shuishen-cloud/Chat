@@ -7,6 +7,10 @@ import { ChatMain } from "@/components/chat-main"
 import { SettingsDialog } from "@/components/settings-dialog"
 import { FavoritesPanel } from "@/components/favorites-panel"
 import { ErrorBoundary } from "@/components/error-boundary"
+import {
+  PromptHistoryPanel,
+  usePromptHistory,
+} from "@/components/prompt-history"
 import { Toaster } from "@/components/ui/sonner"
 import { useChatStore } from "@/hooks/use-chat-store"
 import { cn } from "@/lib/utils"
@@ -30,6 +34,10 @@ export default function App() {
   const store = useChatStore()
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [favoritesOpen, setFavoritesOpen] = useState(false)
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const history = usePromptHistory()
+  /** 点历史项时填入输入框 */
+  const [draft, setDraft] = useState("")
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const { dark, toggle } = useTheme()
 
@@ -96,7 +104,13 @@ export default function App() {
           </div>
 
           <div className="min-h-0 flex-1">
-            <ChatMain store={store} onOpenSettings={() => setSettingsOpen(true)} />
+            <ChatMain
+              store={store}
+              onOpenSettings={() => setSettingsOpen(true)}
+              history={history}
+              draft={draft}
+              onDraftConsumed={() => setDraft("")}
+            />
           </div>
         </div>
 
@@ -104,6 +118,12 @@ export default function App() {
           open={settingsOpen}
           onOpenChange={setSettingsOpen}
           store={store}
+        />
+        <PromptHistoryPanel
+          open={historyOpen}
+          onOpenChange={setHistoryOpen}
+          history={history}
+          onPick={(text) => setDraft(text)}
         />
         <Toaster position="top-center" richColors />
       </div>

@@ -36,9 +36,13 @@ import { MoreHorizontal } from "lucide-react"
 interface Props {
   store: ChatStore
   onOpenSettings: () => void
+  history: import("@/components/prompt-history").PromptHistoryApi
+  /** 由历史面板填入的草稿，消费后通过 onDraftConsumed 清空 */
+  draft: string
+  onDraftConsumed: () => void
 }
 
-export function ChatMain({ store, onOpenSettings }: Props) {
+export function ChatMain({ store, onOpenSettings, history, draft, onDraftConsumed }: Props) {
   const {
     activeConversation,
     activeProject,
@@ -178,6 +182,9 @@ export function ChatMain({ store, onOpenSettings }: Props) {
             onSend={send}
             onStop={stop}
             onOpenSettings={onOpenSettings}
+            draft={draft}
+            onDraftConsumed={onDraftConsumed}
+            history={history}
           />
           <div className="mt-2 text-center text-[11px] text-muted-foreground">
             内容由 AI 生成，请自行甄别 · 仅支持 DeepSeek
@@ -186,6 +193,7 @@ export function ChatMain({ store, onOpenSettings }: Props) {
       </div>
 
       <QuickAskLayer
+        history={history}
         selection={
           selection && activeConversation
             ? { ...selection, conversationId: activeConversation.id }
@@ -473,14 +481,29 @@ function Composer({
   onSend,
   onStop,
   onOpenSettings,
+  draft,
+  onDraftConsumed,
+  history,
 }: {
   isStreaming: boolean
   model: string
   onSend: (text: string) => void
   onStop: () => void
   onOpenSettings: () => void
+  draft: string
+  onDraftConsumed: () => void
+  history: import("@/components/prompt-history").PromptHistoryApi
 }) {
   const [value, setValue] = useState("")
+
+  // 由历史面板填入的草稿
+  useEffect(() => {
+    if (draft) {
+      setValue(draft)
+      onDraftConsumed()
+      requestAnimationFrame(() => taRef.current?.focus())
+    }
+  }, [draft, onDraftConsumed])
   const taRef = useRef<HTMLTextAreaElement>(null)
 
   useEffect(() => {
@@ -492,6 +515,7 @@ function Composer({
 
   function submit() {
     if (!value.trim() || isStreaming) return
+    history.record(value, "chat")
     onSend(value)
     setValue("")
   }

@@ -154,37 +154,50 @@ function regressionFavoritesPanel() {
   })
 }
 
-/** 展开为大对话 / 返回浮窗 */
-function expandCase() {
+/** 浮窗展开为正式对话 + 返回原对话 + 提示词历史 */
+function asConversationCase() {
   return run(async (t) => {
-    await t.mockReply("**回答**：测试内容\n\n```js\nconst a = 1\n```")
+    await t.mockReply("**回答**：测试内容。")
     await t.seed()
+
     await t.selectIn("m2")
     await t.page.locator("[data-qa='bubble']").getByRole("button", { name: /追问/ }).click()
     await t.page.waitForTimeout(300)
-
     const win = t.page.locator("[data-qa='window']")
-    let b = await win.boundingBox()
-    t.eq(Math.round(b.width), 420, "浮窗初始宽度")
-
-    // 先问一轮，确保内容在展开后保留
-    await win.locator("textarea").fill("测试问题")
+    await win.locator("textarea").fill("浮窗提出的问题")
     await win.locator("textarea").press("Enter")
     await t.page.waitForTimeout(800)
 
-    await win.getByRole("button", { name: /展开为大对话/ }).click()
-    await t.page.waitForTimeout(300)
-    b = await win.boundingBox()
-    t.ok(b.width > 1200 && b.height > 800, "展开后铺满视口")
-    t.ok((await win.getByRole("button", { name: /返回浮窗/ }).count()) > 0, "出现返回按钮")
-    t.eq(await win.locator("strong").count(), 1, "回答内容保留")
-    t.eq(await win.locator("pre").count(), 1, "代码块保留")
+    await win.getByRole("button", { name: /展开为对话/ }).click()
+    await t.page.waitForTimeout(600)
+    t.eq(await t.count("[data-qa='window']"), 0, "浮窗关闭")
+    t.eq((await t.state()).conversations.length, 2, "生成正式对话")
+    t.ok((await t.page.locator("main").innerText()).includes("浮窗提出的问题"), "主界面显示内容")
 
-    await win.getByRole("button", { name: /返回浮窗/ }).click()
-    await t.page.waitForTimeout(300)
-    b = await win.boundingBox()
-    t.eq(Math.round(b.width), 420, "返回后恢复宽度")
-    t.eq(Math.round(b.height), 460, "返回后恢复高度")
+    await t.page.getByRole("button", { name: "回到原对话" }).click()
+    await t.page.waitForTimeout(400)
+    t.eq((await t.state()).activeConversationId, "c1", "返回原对话")
+
+    // 主界面提问也进历史
+    await t.page.locator("main textarea").last().fill("主界面的问题")
+    await t.page.locator("main textarea").last().press("Enter")
+    await t.page.waitForTimeout(600)
+
+    // 历史面板
+    await t.page.locator("button[title='提示词历史']").click()
+    await t.page.waitForTimeout(400)
+    const panel = t.page.locator("[data-aux-panel='prompt-history']")
+    const text = await panel.innerText()
+    t.ok(text.includes("浮窗提出的问题"), "历史含浮窗提问")
+    t.ok(text.includes("主界面的问题"), "历史含主界面提问")
+
+    await panel.getByText("浮窗提出的问题").first().click()
+    await t.page.waitForTimeout(400)
+    t.eq(
+      await t.page.locator("main textarea").last().inputValue(),
+      "浮窗提出的问题",
+      "点击历史项填入输入框"
+    )
   })
 }
 
@@ -193,7 +206,7 @@ if (require.main === module) {
     main: mainCase,
     regression: regressionSameMessage,
     favorites: regressionFavoritesPanel,
-    expand: expandCase,
+    asconversation: asConversationCase,
   }
   const pick = process.env.CASE || "main"
   const fn = cases[pick]

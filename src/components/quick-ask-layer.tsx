@@ -13,6 +13,8 @@ interface Props {
   clearSelection: () => void
   /** 当前对话 id */
   conversationId: string | null
+  /** 提示词历史 */
+  history: import("@/components/prompt-history").PromptHistoryApi
   store: ChatStore
 }
 
@@ -40,6 +42,7 @@ export function QuickAskLayer({
   selection,
   clearSelection,
   conversationId,
+  history,
   store,
 }: Props) {
   const [instances, setInstances] = useState<Instance[]>([])
@@ -107,6 +110,7 @@ export function QuickAskLayer({
           initialRect={inst.ctx.rect}
           index={idx}
           autoOpen
+          history={history}
           store={store}
           onClose={() => close(inst.key)}
           onQuoteFavorite={favoriteQuote}
@@ -124,6 +128,7 @@ export function QuickAskLayer({
           initialRect={liveCtx.rect}
           index={instances.length}
           autoOpen={false}
+          history={history}
           store={store}
           onClose={() => clearSelection()}
           onQuoteFavorite={favoriteQuote}
