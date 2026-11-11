@@ -62,6 +62,9 @@ export interface Project {
   createdAt: number
 }
 
+/** 侧边栏视图模式 */
+export type SidebarView = "list" | "tree"
+
 export interface ChatState {
   projects: Project[]
   conversations: Conversation[]
@@ -72,6 +75,7 @@ export interface ChatState {
   apiKey: string
   baseUrl: string
   model: string
+  sidebarView: SidebarView
 }
 
 export const DEFAULT_BASE_URL = "https://api.deepseek.com"

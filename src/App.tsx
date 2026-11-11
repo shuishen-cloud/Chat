@@ -6,6 +6,7 @@ import { ChatSidebar } from "@/components/chat-sidebar"
 import { ChatMain } from "@/components/chat-main"
 import { SettingsDialog } from "@/components/settings-dialog"
 import { FavoritesPanel } from "@/components/favorites-panel"
+import { ErrorBoundary } from "@/components/error-boundary"
 import { Toaster } from "@/components/ui/sonner"
 import { useChatStore } from "@/hooks/use-chat-store"
 import { cn } from "@/lib/utils"
@@ -48,11 +49,13 @@ export default function App() {
           />
         </div>
 
-        <FavoritesPanel
-          open={favoritesOpen}
-          onOpenChange={setFavoritesOpen}
-          store={store}
-        />
+        <ErrorBoundary label="收藏面板" resetKey={favoritesOpen}>
+          <FavoritesPanel
+            open={favoritesOpen}
+            onOpenChange={setFavoritesOpen}
+            store={store}
+          />
+        </ErrorBoundary>
 
         <div className="flex min-w-0 flex-1 flex-col">
           <div className="flex h-11 shrink-0 items-center gap-1 border-b border-border px-2">

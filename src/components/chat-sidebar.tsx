@@ -15,6 +15,8 @@ import {
   PinOff,
   Plus,
   Search,
+  List,
+  ListTree,
   Settings,
   Star,
   Trash2,
@@ -54,7 +56,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import type { ChatStore } from "@/hooks/use-chat-store"
-import type { Conversation } from "@/lib/types"
+import type { Conversation, Project } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
 interface Props {
@@ -86,6 +88,9 @@ export function ChatSidebar({ store, onOpenSettings, onOpenFavorites }: Props) {
     toggleArchive,
     unarchiveAll,
     duplicateConversation,
+    state,
+    setSidebarView,
+    projects: allProjects,
   } = store
 
   const [newProjectOpen, setNewProjectOpen] = useState(false)
@@ -94,6 +99,8 @@ export function ChatSidebar({ store, onOpenSettings, onOpenFavorites }: Props) {
   const [deletingProject, setDeletingProject] = useState<string | null>(null)
   const [query, setQuery] = useState("")
   const [showArchived, setShowArchived] = useState(false)
+  const [collapsedProjects, setCollapsedProjects] = useState<Set<string>>(new Set())
+  const view = state.sidebarView
 
   /** 搜索过滤：标题 + 消息正文 */
   const filtered = useMemo(() => {
@@ -105,6 +112,26 @@ export function ChatSidebar({ store, onOpenSettings, onOpenFavorites }: Props) {
         c.messages.some((m) => m.content.toLowerCase().includes(q))
     )
   }, [visibleConversations, query])
+
+  /** 树视图：按项目分组的全部对话（含搜索过滤） */
+  const treeGroups = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    return allProjects.map((proj) => {
+      const convs = store.state.conversations
+        .filter((c) => c.projectId === proj.id && !c.archived)
+        .sort((a, b) => {
+          if (!!a.pinned !== !!b.pinned) return a.pinned ? -1 : 1
+          return b.updatedAt - a.updatedAt
+        })
+        .filter((c) =>
+          !q
+            ? true
+            : c.title.toLowerCase().includes(q) ||
+              c.messages.some((m) => m.content.toLowerCase().includes(q))
+        )
+      return { project: proj, conversations: convs }
+    })
+  }, [allProjects, store.state.conversations, query])
 
   const pinnedList = filtered.filter((c) => c.pinned)
   const normalList = filtered.filter((c) => !c.pinned)
@@ -312,14 +339,14 @@ export function ChatSidebar({ store, onOpenSettings, onOpenFavorites }: Props) {
         </Tooltip>
       </div>
 
-      {/* 搜索 */}
-      <div className="px-2 pb-2">
-        <div className="relative">
+      {/* 搜索 + 视图切换 */}
+      <div className="flex items-center gap-1 px-2 pb-2">
+        <div className="relative min-w-0 flex-1">
           <Search className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="搜索对话与内容"
+            placeholder={view === "tree" ? "搜索全部项目" : "搜索对话与内容"}
             className="h-8 pl-7 text-xs"
           />
           {query && (
@@ -332,6 +359,29 @@ export function ChatSidebar({ store, onOpenSettings, onOpenFavorites }: Props) {
             </button>
           )}
         </div>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-8 shrink-0"
+                onClick={() =>
+                  setSidebarView(view === "list" ? "tree" : "list")
+                }
+              >
+                {view === "list" ? (
+                  <ListTree className="size-4" />
+                ) : (
+                  <List className="size-4" />
+                )}
+              </Button>
+            }
+          />
+          <TooltipContent>
+            {view === "list" ? "切换到树状视图" : "切换到列表视图"}
+          </TooltipContent>
+        </Tooltip>
       </div>
 
       <Separator />
@@ -356,6 +406,24 @@ export function ChatSidebar({ store, onOpenSettings, onOpenFavorites }: Props) {
 
           <Separator className="my-1.5" />
 
+          {view === "tree" ? (
+            <TreeView
+              groups={treeGroups}
+              activeProjectId={activeProject?.id ?? null}
+              collapsed={collapsedProjects}
+              onToggleCollapse={(id) =>
+                setCollapsedProjects((prev) => {
+                  const next = new Set(prev)
+                  if (next.has(id)) next.delete(id)
+                  else next.add(id)
+                  return next
+                })
+              }
+              onSelectProject={selectProject}
+              renderConversation={renderConversation}
+            />
+          ) : (
+          <>
           {/* 置顶 */}
           {pinnedList.length > 0 && (
             <>
@@ -413,6 +481,8 @@ export function ChatSidebar({ store, onOpenSettings, onOpenFavorites }: Props) {
                 </>
               )}
             </div>
+          )}
+          </>
           )}
         </div>
       </ScrollArea>
@@ -509,6 +579,97 @@ export function ChatSidebar({ store, onOpenSettings, onOpenFavorites }: Props) {
         </AlertDialogContent>
       </AlertDialog>
     </aside>
+  )
+}
+
+/* ------------------------------------------------------------------ */
+
+/** 树状视图：项目为父节点、对话为子节点，可折叠 */
+function TreeView({
+  groups,
+  activeProjectId,
+  collapsed,
+  onToggleCollapse,
+  onSelectProject,
+  renderConversation,
+}: {
+  groups: Array<{ project: Project; conversations: Conversation[] }>
+  activeProjectId: string | null
+  collapsed: Set<string>
+  onToggleCollapse: (id: string) => void
+  onSelectProject: (id: string) => void
+  renderConversation: (c: Conversation, archived?: boolean) => React.ReactNode
+}) {
+  const visibleGroups = groups.filter((g) => g.conversations.length > 0)
+
+  if (visibleGroups.length === 0) {
+    return (
+      <div className="px-2 py-6 text-center text-xs text-muted-foreground">
+        没有匹配的对话
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex flex-col gap-1">
+      {visibleGroups.map(({ project, conversations }) => {
+        const isCollapsed = collapsed.has(project.id)
+        const isActiveProject = project.id === activeProjectId
+        return (
+          <div key={project.id}>
+            <div
+              className={cn(
+                "group/proj flex items-center gap-1 rounded-md pr-1 transition-colors",
+                isActiveProject ? "bg-sidebar-accent/60" : "hover:bg-sidebar-accent/40"
+              )}
+            >
+              <button
+                type="button"
+                onClick={() => onToggleCollapse(project.id)}
+                className="flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground"
+                aria-label={isCollapsed ? "展开" : "折叠"}
+              >
+                <ChevronRight
+                  className={cn(
+                    "size-3 transition-transform",
+                    !isCollapsed && "rotate-90"
+                  )}
+                />
+              </button>
+              <button
+                type="button"
+                onClick={() => onSelectProject(project.id)}
+                className="flex min-w-0 flex-1 items-center gap-1.5 py-1.5 text-left"
+              >
+                <FolderClosed
+                  className={cn(
+                    "size-3.5 shrink-0",
+                    isActiveProject ? "text-foreground" : "text-muted-foreground"
+                  )}
+                />
+                <span
+                  className={cn(
+                    "truncate text-xs font-medium",
+                    isActiveProject ? "text-foreground" : "text-muted-foreground"
+                  )}
+                >
+                  {project.name}
+                </span>
+                <span className="shrink-0 text-[10px] text-muted-foreground/60 tabular-nums">
+                  {conversations.length}
+                </span>
+              </button>
+            </div>
+
+            {!isCollapsed && (
+              <div className="ml-3 flex flex-col gap-0.5 border-l border-border pl-1.5">
+                {conversations.map((c) => renderConversation(c))}
+              </div>
+            )}
+          </div>
+        )
+      })}
+    </div>
   )
 }
 

@@ -25,6 +25,7 @@ import {
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuGroup,
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
@@ -327,20 +328,22 @@ export function FavoritesPanel({ open, onOpenChange, store }: Props) {
                 </Button>
               }
             />
-            <DropdownMenuContent align="end" className="w-40">
-              <DropdownMenuLabel>排序</DropdownMenuLabel>
-              {(
-                [
-                  ["recent", "收藏时间（新→旧）"],
-                  ["oldest", "收藏时间（旧→新）"],
-                  ["conversation", "按对话名"],
-                ] as const
-              ).map(([k, label]) => (
-                <DropdownMenuItem key={k} onClick={() => setSort(k)} className="gap-2">
-                  <span className="flex-1">{label}</span>
-                  {sort === k && <Check className="size-3.5" />}
-                </DropdownMenuItem>
-              ))}
+            <DropdownMenuContent align="end" className="w-44">
+              <DropdownMenuGroup>
+                <DropdownMenuLabel>排序</DropdownMenuLabel>
+                {(
+                  [
+                    ["recent", "收藏时间（新→旧）"],
+                    ["oldest", "收藏时间（旧→新）"],
+                    ["conversation", "按对话名"],
+                  ] as const
+                ).map(([k, label]) => (
+                  <DropdownMenuItem key={k} onClick={() => setSort(k)} className="gap-2">
+                    <span className="flex-1">{label}</span>
+                    {sort === k && <Check className="size-3.5" />}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuGroup>
             </DropdownMenuContent>
           </DropdownMenu>
 
@@ -357,19 +360,21 @@ export function FavoritesPanel({ open, onOpenChange, store }: Props) {
               }
             />
             <DropdownMenuContent align="end" className="w-32">
-              <DropdownMenuLabel>分组</DropdownMenuLabel>
-              {(
-                [
-                  ["project", "按项目"],
-                  ["tag", "按标签"],
-                  ["none", "不分组"],
-                ] as const
-              ).map(([k, label]) => (
-                <DropdownMenuItem key={k} onClick={() => setGroup(k)} className="gap-2">
-                  <span className="flex-1">{label}</span>
-                  {group === k && <Check className="size-3.5" />}
-                </DropdownMenuItem>
-              ))}
+              <DropdownMenuGroup>
+                <DropdownMenuLabel>分组</DropdownMenuLabel>
+                {(
+                  [
+                    ["project", "按项目"],
+                    ["tag", "按标签"],
+                    ["none", "不分组"],
+                  ] as const
+                ).map(([k, label]) => (
+                  <DropdownMenuItem key={k} onClick={() => setGroup(k)} className="gap-2">
+                    <span className="flex-1">{label}</span>
+                    {group === k && <Check className="size-3.5" />}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuGroup>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>

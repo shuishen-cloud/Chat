@@ -21,6 +21,7 @@ const EMPTY: ChatState = {
   apiKey: "",
   baseUrl: DEFAULT_BASE_URL,
   model: DEFAULT_MODEL,
+  sidebarView: "list",
 }
 
 /**

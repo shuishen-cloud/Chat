@@ -415,6 +415,10 @@ export function useChatStore() {
     return map
   }, [state.favorites])
 
+  const setSidebarView = useCallback((view: ChatState["sidebarView"]) => {
+    setState((prev) => ({ ...prev, sidebarView: view }))
+  }, [])
+
   /* ---------------- 搜索 ---------------- */
 
   /** 按标题与消息内容搜索当前项目下的对话 */
@@ -739,6 +743,7 @@ export function useChatStore() {
     tagCounts,
     searchConversations,
     updateSettings,
+    setSidebarView,
     send,
     stop,
     regenerate,
