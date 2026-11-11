@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
+import type { Conversation } from "@/lib/types"
 
 export interface PromptHistoryItem {
   id: string
@@ -25,8 +26,6 @@ const MAX_PER_CONVERSATION = 100
 
 function load(): HistoryMap {
   try {
-    // 清理旧版全局历史（无法可靠映射到具体对话）
-    localStorage.removeItem(LEGACY_KEY)
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) return {}
     const data = JSON.parse(raw)
@@ -53,12 +52,103 @@ function save(map: HistoryMap) {
   }
 }
 
+/** 旧版全局历史条目 */
+interface LegacyItem {
+  id?: string
+  text: string
+  usedAt: number
+  source?: "chat" | "quickask"
+}
+
+function readLegacy(): LegacyItem[] {
+  try {
+    const raw = localStorage.getItem(LEGACY_KEY)
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    return parsed.filter(
+      (i): i is LegacyItem =>
+        !!i && typeof i.text === "string" && typeof i.usedAt === "number"
+    )
+  } catch {
+    return []
+  }
+}
+
+/** 把旧版全局历史按「文本或时间」就近归属到对话 */
+function migrateLegacy(conversations: Conversation[]): HistoryMap {
+  const legacy = readLegacy()
+  if (legacy.length === 0) return {}
+
+  const userMessages = conversations.flatMap((c) =>
+    c.messages
+      .filter((m) => m.role === "user" && m.content.trim())
+      .map((m) => ({ convId: c.id, text: m.content.trim(), at: m.createdAt }))
+  )
+  if (userMessages.length === 0) return {}
+
+  const out: HistoryMap = {}
+  for (const item of legacy) {
+    const text = item.text.trim()
+    // 优先：文本完全一致的 user 消息
+    let convId =
+      userMessages.find((m) => m.text === text)?.convId ?? null
+    // 其次：时间最近且相差不到一天
+    if (!convId) {
+      let best: { convId: string; diff: number } | null = null
+      for (const m of userMessages) {
+        const diff = Math.abs(m.at - item.usedAt)
+        if (!best || diff < best.diff) best = { convId: m.convId, diff }
+      }
+      if (best && best.diff < 86_400_000) convId = best.convId
+    }
+    if (!convId) continue
+
+    const list = out[convId] ?? []
+    if (list.some((i) => i.text === text)) continue
+    list.push({
+      id:
+        item.id ??
+        `ph_legacy_${item.usedAt}_${Math.random().toString(36).slice(2, 6)}`,
+      text,
+      usedAt: item.usedAt,
+      source: item.source ?? "chat",
+    })
+    out[convId] = list
+  }
+  return out
+}
+
 /**
- * 提示词历史：按对话隔离，每个对话维护自己的提问记录。
- * 存储独立于 ChatState，避免污染主状态。
+ * 提示词历史：按对话隔离。
+ * 来源有三：
+ *  1. 显式记录（发送时写入）
+ *  2. 对话内的 user 消息（始终可作为历史回读）
+ *  3. 旧版全局历史（首次启动时按时间迁移）
  */
-export function usePromptHistory() {
-  const [map, setMap] = useState<HistoryMap>(() => load())
+export function usePromptHistory(conversations: Conversation[] = []) {
+  const [map, setMap] = useState<HistoryMap>(() => {
+    const stored = load()
+    // 首次启动时把旧版全局历史迁移进对应对话
+    const legacy = migrateLegacy(conversations)
+    if (Object.keys(legacy).length === 0) return stored
+    const merged: HistoryMap = { ...stored }
+    for (const [convId, items] of Object.entries(legacy)) {
+      const existing = merged[convId] ?? []
+      const texts = new Set(existing.map((i) => i.text))
+      merged[convId] = [
+        ...existing,
+        ...items.filter((i) => !texts.has(i.text)),
+      ].sort((a, b) => b.usedAt - a.usedAt)
+    }
+    // 迁移成功后清掉旧键，避免重复迁移
+    try {
+      localStorage.removeItem(LEGACY_KEY)
+    } catch {
+      /* 忽略 */
+    }
+    return merged
+  })
   const saveTimer = useRef<number | null>(null)
 
   useEffect(() => {
@@ -109,11 +199,38 @@ export function usePromptHistory() {
     setMap((prev) => ({ ...prev, [conversationId]: [] }))
   }, [])
 
-  /** 某个对话的历史 */
+  /**
+   * 某个对话的历史：显式记录 + 该对话内的 user 消息（去重合并）。
+   * 这样即便记录丢失，历史也能从对话内容里自动读出来。
+   */
   const getItems = useCallback(
-    (conversationId: string | null) =>
-      conversationId ? (map[conversationId] ?? []) : [],
-    [map]
+    (conversationId: string | null): PromptHistoryItem[] => {
+      if (!conversationId) return []
+      const recorded = map[conversationId] ?? []
+
+      const conv = conversations.find((c) => c.id === conversationId)
+      const fromMessages: PromptHistoryItem[] = conv
+        ? conv.messages
+            .filter((m) => m.role === "user" && m.content.trim())
+            .map((m) => ({
+              id: `msg_${m.id}`,
+              text: m.content.trim(),
+              usedAt: m.createdAt,
+              source: "chat" as const,
+            }))
+        : []
+
+      const seen = new Set(recorded.map((i) => i.text))
+      const merged = [...recorded]
+      for (const m of fromMessages) {
+        if (!seen.has(m.text)) {
+          seen.add(m.text)
+          merged.push(m)
+        }
+      }
+      return merged.sort((a, b) => b.usedAt - a.usedAt)
+    },
+    [map, conversations]
   )
 
   /** 全部对话的历史条数合计 */
@@ -322,6 +439,9 @@ export function PromptHistoryPanel({
 }
 
 function relativeTime(ts: number): string {
+  const d0 = new Date(ts)
+  // 明显异常的极早时间戳不展示，避免出现 1970/1/1
+  if (Number.isNaN(d0.getTime()) || d0.getFullYear() < 2000) return ""
   const diff = Date.now() - ts
   if (diff < 60_000) return "刚刚"
   if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} 分钟前`

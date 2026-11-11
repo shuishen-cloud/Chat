@@ -293,6 +293,61 @@ function historyPerConversationCase() {
   })
 }
 
+/** 历史可从对话消息自动回读 + 旧版全局历史迁移 */
+function historyAutoCase() {
+  return run(async (t) => {
+    await t.seed({
+      projects: [{ id: "p1", name: "前端", createdAt: 1 }],
+      conversations: [
+        {
+          id: "c1", projectId: "p1", title: "老对话", createdAt: 1, updatedAt: 1,
+          messages: [
+            { id: "u1", role: "user", content: "历史问题一", createdAt: 1_700_000_000_000 },
+            { id: "a1", role: "assistant", content: "回答一", createdAt: 1_700_000_001_000 },
+            { id: "u2", role: "user", content: "历史问题二", createdAt: 1_700_000_002_000 },
+            { id: "a2", role: "assistant", content: "回答二", createdAt: 1_700_000_003_000 },
+          ],
+        },
+      ],
+      favorites: [], tags: [], activeProjectId: "p1", activeConversationId: "c1",
+      apiKey: "sk-t", baseUrl: "https://api.deepseek.com",
+      model: "deepseek-v4-pro", sidebarView: "list",
+    })
+
+    // 无任何历史记录时，应能从消息自动读出
+    await t.page.locator("button[title^='「']").first().click()
+    await t.page.waitForTimeout(300)
+    const panel = t.page.locator("[data-aux-panel='prompt-history']")
+    let txt = await panel.innerText()
+    t.ok(txt.includes("历史问题一") && txt.includes("历史问题二"), "从消息自动回读历史")
+    t.eq(await panel.locator("div.group\\/ph").count(), 2, "无重复")
+    await t.page.keyboard.press("Escape")
+    await t.page.waitForTimeout(200)
+
+    // 旧版全局历史迁移
+    await t.page.evaluate(() => {
+      localStorage.removeItem("shadcn-chat/prompt-history/v2")
+      localStorage.setItem(
+        "shadcn-chat/prompt-history/v1",
+        JSON.stringify([
+          { id: "old1", text: "迁移问题A", usedAt: 1_700_000_000_500 },
+        ])
+      )
+    })
+    await t.page.reload({ waitUntil: "domcontentloaded" })
+    await t.page.waitForTimeout(500)
+    await t.page.locator("button[title^='「']").first().click()
+    await t.page.waitForTimeout(300)
+    txt = await panel.innerText()
+    t.ok(txt.includes("迁移问题A"), "旧版历史已迁移")
+    t.eq(
+      await t.page.evaluate(() => localStorage.getItem("shadcn-chat/prompt-history/v1")),
+      null,
+      "迁移后清理旧键"
+    )
+  })
+}
+
 if (require.main === module) {
   const cases = {
     main: mainCase,
@@ -301,6 +356,7 @@ if (require.main === module) {
     asconversation: asConversationCase,
     switcher: switcherCase,
     history: historyPerConversationCase,
+    historyauto: historyAutoCase,
   }
   const pick = process.env.CASE || "main"
   const fn = cases[pick]

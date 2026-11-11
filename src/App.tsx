@@ -35,7 +35,7 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [favoritesOpen, setFavoritesOpen] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
-  const history = usePromptHistory()
+  const history = usePromptHistory(store.state.conversations)
   /** 点历史项时填入输入框 */
   const [draft, setDraft] = useState("")
   const [sidebarOpen, setSidebarOpen] = useState(true)
