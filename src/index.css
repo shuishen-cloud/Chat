@@ -1,13 +1,43 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
-@import "@fontsource-variable/geist";
+
+/* ---------------- 自托管字体：public/fonts ---------------- */
+/* 英文字体：Fira Code（可变字重 300-700） */
+@font-face {
+  font-family: 'Fira Code';
+  src: url('/fonts/fira-code/FiraCode-VF.woff2') format('woff2-variations');
+  font-weight: 300 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* 中文字体：霞鹜文楷（Regular 400 / Medium 500，已子集化为 woff2） */
+@font-face {
+  font-family: 'LXGW WenKai';
+  src: url('/fonts/lxgw-wenkai/LXGWWenKai-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'LXGW WenKai';
+  src: url('/fonts/lxgw-wenkai/LXGWWenKai-Medium.woff2') format('woff2');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
 
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
     --font-heading: var(--font-sans);
-    --font-sans: 'Geist Variable', sans-serif;
+    /* 正文：霞鹜文楷主用（自带拉丁字形，中英混排风格一致） */
+    --font-sans: 'LXGW WenKai', ui-sans-serif, system-ui, -apple-system, 'PingFang SC',
+                 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+    /* 等宽：Fira Code 仅用于代码场景 */
+    --font-mono: 'Fira Code', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     --color-sidebar-ring: var(--sidebar-ring);
     --color-sidebar-border: var(--sidebar-border);
     --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -127,6 +157,11 @@
   html {
     @apply font-sans;
     }
+  /* 字体平滑：让笔画更实，减轻小字号发虚 */
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    }
 }
 /* ---------------- 对话正文排版（替代 typography 插件，保持轻量） ---------------- */
 @layer components {
@@ -159,14 +194,14 @@
     background: var(--muted);
     padding: 0.12rem 0.32rem;
     font-size: 0.85em;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-family: var(--font-mono);
   }
 
   .prose-chat pre code {
     background: transparent;
     padding: 0;
     font-size: inherit;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-family: var(--font-mono);
   }
 
   .prose-chat img { margin-block: 0.8rem; border-radius: 0.5rem; max-width: 100%; }
@@ -199,5 +234,139 @@
   }
   ::-webkit-scrollbar-corner {
     background: transparent;
+  }
+}
+
+/* ---------------- 画布（React Flow）：把默认色板映射到项目主题变量 ---------------- */
+@layer base {
+  .react-flow {
+    --xy-background-color: var(--background);
+    --xy-background-pattern-color: var(--border);
+    --xy-edge-stroke: var(--muted-foreground);
+    --xy-edge-stroke-selected: var(--primary);
+    --xy-connectionline-stroke: var(--primary);
+    --xy-edge-label-background-color: var(--background);
+    --xy-edge-label-color: var(--muted-foreground);
+    --xy-attribution-background-color: transparent;
+
+    --xy-controls-button-background-color: var(--card);
+    --xy-controls-button-background-color-hover: var(--muted);
+    --xy-controls-button-border-color: var(--border);
+    --xy-controls-button-color: var(--muted-foreground);
+    --xy-controls-button-color-hover: var(--foreground);
+    --xy-controls-box-shadow: 0 0 0 1px var(--border);
+
+    --xy-minimap-background-color: var(--card);
+    --xy-minimap-mask-background-color: color-mix(in oklab, var(--background) 60%, transparent);
+  }
+
+  .react-flow__node {
+    font-family: inherit;
+    /* 节点内部的按钮不应触发画布拖拽以外的默认行为 */
+    cursor: grab;
+  }
+  .react-flow__node:active {
+    cursor: grabbing;
+  }
+  /* 便签里的文本域需要可选中编辑 */
+  .react-flow__node textarea {
+    cursor: text;
+  }
+  .react-flow__handle {
+    width: 8px;
+    height: 8px;
+    border: 1.5px solid var(--background);
+    background: var(--muted-foreground);
+  }
+  .react-flow__handle:hover {
+    background: var(--primary);
+  }
+  .react-flow__minimap {
+    border-radius: 0.5rem;
+  }
+}
+
+/* ---------------- 定位消息后的短暂高亮 ---------------- */
+@keyframes msg-flash {
+  0%,
+  100% {
+    background-color: transparent;
+  }
+  20%,
+  60% {
+    background-color: color-mix(in oklab, var(--primary) 12%, transparent);
+  }
+}
+.msg-flash {
+  border-radius: 0.75rem;
+  animation: msg-flash 1.2s ease-out;
+}
+
+/* ---------------- 画板：连线与四向手柄 ---------------- */
+@layer components {
+  /* 四向手柄：默认小圆点，hover 放大 */
+  .board-handle {
+    width: 7px;
+    height: 7px;
+    border: 1.5px solid var(--background);
+    background: var(--muted-foreground);
+    opacity: 0.6;
+    transition: opacity 0.15s, transform 0.15s, background-color 0.15s;
+  }
+  .react-flow__node:hover .board-handle {
+    opacity: 1;
+  }
+  .board-handle:hover {
+    background: var(--primary);
+    transform: scale(1.4);
+  }
+  /* source 手柄略亮，便于区分「从哪拖出」 */
+  .board-handle-source {
+    background: var(--primary);
+  }
+
+  /* 可执行连线：主题色 */
+  .board-edge-flow .react-flow__edge-path {
+    stroke: var(--primary);
+    stroke-width: 1.8;
+  }
+
+  /* 禁用的线：置灰虚线 */
+  .board-edge-disabled .react-flow__edge-path {
+    stroke: var(--muted-foreground);
+    stroke-dasharray: 4 4;
+    opacity: 0.5;
+  }
+
+  /* 被选进任务的线：加粗高亮 */
+  .board-edge-selected .react-flow__edge-path {
+    stroke: var(--primary);
+    stroke-width: 3;
+  }
+
+  /* 选边模式下整条线都可点，给出指针提示 */
+  .board-edge-selectable .react-flow__edge-path {
+    cursor: pointer;
+  }
+
+  /* 线上的提示词徽章 */
+  .board-edge-label {
+    font-size: 10px;
+    fill: var(--muted-foreground);
+  }
+  .board-edge-label-flow {
+    fill: var(--primary);
+  }
+  .board-edge-label-disabled {
+    fill: var(--muted-foreground);
+    opacity: 0.6;
+  }
+  .board-edge-label-selected {
+    fill: var(--primary);
+    font-weight: 600;
+  }
+  /* 徽章底色，避免与曲线重叠看不清 */
+  .react-flow__edge-textbg {
+    fill: var(--background);
   }
 }

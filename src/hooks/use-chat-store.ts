@@ -1,14 +1,30 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { toast } from "sonner"
 import { streamChat } from "@/lib/deepseek"
-import { loadState, nextTitle, saveState } from "@/lib/storage"
+import { loadState, nextTitle, saveState, withBoardGc } from "@/lib/storage"
 import {
+  BOARD_COLUMNS,
+  BOARD_GAP_X,
+  BOARD_GAP_Y,
+  BOARD_NODE_H,
+  BOARD_NODE_W,
   TAG_HUES,
+  createBoard,
+  createBoardEdge,
+  createBoardNode,
+  createBoardTask,
   createConversation,
   createFavorite,
+  createNoteNode,
   createProject,
+  isRunnableEdge,
   newMessage,
   uid,
+  type Board,
+  type BoardEdge,
+  type BoardNode,
+  type BoardTask,
+  type NodeRun,
   type ChatState,
   type Conversation,
   type Favorite,
@@ -25,8 +41,17 @@ export interface BranchNode {
   depth: number
 }
 
-/** 收藏项 + 解析后的关联对象 */
-export interface FavoriteEntry {
+/** 画板节点 + 解析后的源消息，供画布渲染 */
+export interface BoardNodeEntry {
+  node: BoardNode
+  /** 引用型节点的源消息；便签节点为 undefined */
+  message: Message | undefined
+  conversation: Conversation | undefined
+  /** 参与渲染的正文：摘录优先，否则源消息内容 */
+  text: string
+}
+
+/** 收藏项 + 解析后的关联对象 */export interface FavoriteEntry {
   favorite: Favorite
   message: Message
   conversation: Conversation
@@ -206,13 +231,14 @@ export function useChatStore() {
         : (conversations
             .filter((c) => c.projectId === activeProjectId)
             .sort((a, b) => b.updatedAt - a.updatedAt)[0]?.id ?? null)
-      return {
+      // 项目被删后，其对话全部消失，画板里的引用需要一并清理
+      return withBoardGc({
         ...prev,
         projects,
         conversations,
         activeProjectId,
         activeConversationId,
-      }
+      })
     })
   }, [])
 
@@ -245,6 +271,27 @@ export function useChatStore() {
       }
     })
   }, [])
+
+  /**
+   * 跳转并定位到某条消息：切项目 + 切对话 + 回对话视图，再把消息滚到可视区。
+   * 画板卡片、收藏条目都复用这个动作，避免只切对话不滚动导致「看起来没反应」。
+   */
+  const jumpToMessage = useCallback(
+    (conversationId: string, messageId?: string) => {
+      setState((prev) => {
+        const target = prev.conversations.find((c) => c.id === conversationId)
+        if (!target) return prev
+        return {
+          ...prev,
+          activeProjectId: target.projectId,
+          activeConversationId: target.id,
+          mainView: "chat",
+        }
+      })
+      if (messageId) scrollMessageIntoView(messageId)
+    },
+    []
+  )
 
   /* ---------------- 会话 ---------------- */
 
@@ -282,19 +329,21 @@ export function useChatStore() {
               .filter((c) => c.projectId === prev.activeProjectId)
               .sort((a, b) => b.updatedAt - a.updatedAt)[0]?.id ?? null)
           : prev.activeConversationId
-      return { ...prev, conversations, activeConversationId }
+      return withBoardGc({ ...prev, conversations, activeConversationId })
     })
   }, [])
 
   const clearConversation = useCallback((id: string) => {
-    setState((prev) => ({
-      ...prev,
-      conversations: prev.conversations.map((c) =>
-        c.id === id
-          ? { ...c, messages: [], title: "新对话", updatedAt: Date.now() }
-          : c
-      ),
-    }))
+    setState((prev) =>
+      withBoardGc({
+        ...prev,
+        conversations: prev.conversations.map((c) =>
+          c.id === id
+            ? { ...c, messages: [], title: "新对话", updatedAt: Date.now() }
+            : c
+        ),
+      })
+    )
   }, [])
 
   const moveConversation = useCallback((convId: string, projectId: string) => {
@@ -510,6 +559,529 @@ export function useChatStore() {
     return map
   }, [state.favorites])
 
+  /* ---------------- 画板 ---------------- */
+
+  /** 当前项目可用的画板（含跨项目共享的，projectId 为 null） */
+  const projectBoards = useMemo(
+    () =>
+      state.boards
+        .filter(
+          (b) =>
+            b.projectId === null || b.projectId === state.activeProjectId
+        )
+        .sort((a, b) => b.updatedAt - a.updatedAt),
+    [state.boards, state.activeProjectId]
+  )
+
+  const activeBoard = useMemo(
+    () => state.boards.find((b) => b.id === state.activeBoardId) ?? null,
+    [state.boards, state.activeBoardId]
+  )
+
+  /** 当前画板的节点 + 解析后的源消息 */
+  const boardNodeEntries = useMemo((): BoardNodeEntry[] => {
+    if (!activeBoard) return []
+    const out: BoardNodeEntry[] = []
+    for (const node of state.boardNodes) {
+      if (node.boardId !== activeBoard.id) continue
+      if (node.kind === "note") {
+        out.push({ node, message: undefined, conversation: undefined, text: node.note ?? "" })
+        continue
+      }
+      const conv = state.conversations.find(
+        (c) => c.id === node.ref?.conversationId
+      )
+      const message = conv?.messages.find((m) => m.id === node.ref?.messageId)
+      out.push({
+        node,
+        message,
+        conversation: conv,
+        text: node.excerpt || message?.content || "",
+      })
+    }
+    return out
+  }, [activeBoard, state.boardNodes, state.conversations])
+
+  /** 当前画板的任务列表 */
+  const projectTasks = useMemo(
+    () =>
+      activeBoard
+        ? state.boardTasks.filter((t) => t.boardId === activeBoard.id)
+        : [],
+    [activeBoard, state.boardTasks]
+  )
+
+  const activeTask = useMemo(
+    () => state.boardTasks.find((t) => t.id === state.activeTaskId) ?? null,
+    [state.boardTasks, state.activeTaskId]
+  )
+
+  /** 当前画板的连线 */
+  const boardEdges = useMemo(
+    () =>
+      activeBoard
+        ? state.boardEdges.filter((e) => e.boardId === activeBoard.id)
+        : [],
+    [activeBoard, state.boardEdges]
+  )
+
+  const setMainView = useCallback((view: ChatState["mainView"]) => {
+    setState((prev) => ({ ...prev, mainView: view }))
+  }, [])
+
+  /** 新建画板并切换过去，若当前项目已有画板则直接切换 */
+  const addBoard = useCallback((name?: string): Board => {
+    const board = createBoard(null, name?.trim() || "新画板")
+    setState((prev) => ({
+      ...withBoardGc(prev),
+      boards: [...prev.boards, board],
+      activeBoardId: board.id,
+      mainView: "board",
+    }))
+    return board
+  }, [])
+
+  const selectBoard = useCallback((id: string) => {
+    setState((prev) => ({
+      ...prev,
+      activeBoardId: id,
+      mainView: "board",
+    }))
+  }, [])
+
+  const renameBoard = useCallback((id: string, name: string) => {
+    setState((prev) => ({
+      ...prev,
+      boards: prev.boards.map((b) =>
+        b.id === id ? { ...b, name: name.trim() || b.name } : b
+      ),
+    }))
+  }, [])
+
+  /** 删除画板及其全部节点与连线 */
+  const deleteBoard = useCallback((id: string) => {
+    setState((prev) => {
+      const boards = prev.boards.filter((b) => b.id !== id)
+      return {
+        ...prev,
+        boards,
+        boardNodes: prev.boardNodes.filter((n) => n.boardId !== id),
+        boardEdges: prev.boardEdges.filter((e) => e.boardId !== id),
+        activeBoardId:
+          prev.activeBoardId === id ? (boards[0]?.id ?? null) : prev.activeBoardId,
+      }
+    })
+  }, [])
+
+  /**
+   * 批量把多条消息加入指定画板。
+   * 返回实际新增 / 跳过的数量，供 UI 给出准确提示（而不是笼统的「已加入」）。
+   */
+  const addMessagesToBoard = useCallback(
+    (
+      conversationId: string,
+      messageIds: string[],
+      boardId: string
+    ): { added: number; skipped: number } => {
+      let added = 0
+      let skipped = 0
+      setState((prev) => {
+        const exists = new Set(
+          prev.boardNodes
+            .filter((n) => n.boardId === boardId && n.ref)
+            .map((n) => `${n.ref!.conversationId}:${n.ref!.messageId}`)
+        )
+        const siblings = prev.boardNodes.filter((n) => n.boardId === boardId)
+        const fresh: BoardNode[] = []
+        for (const messageId of messageIds) {
+          const key = `${conversationId}:${messageId}`
+          if (exists.has(key)) {
+            skipped++
+            continue
+          }
+          exists.add(key)
+          fresh.push(
+            createBoardNode(boardId, { conversationId, messageId }, siblings.length + fresh.length)
+          )
+        }
+        added = fresh.length
+        if (fresh.length === 0) return prev
+        return {
+          ...prev,
+          boardNodes: [...prev.boardNodes, ...fresh],
+          activeBoardId: boardId,
+          boards: prev.boards.map((b) =>
+            b.id === boardId ? { ...b, updatedAt: Date.now() } : b
+          ),
+        }
+      })
+      return { added, skipped }
+    },
+    []
+  )
+
+  /**
+   * 把消息加入画板：已存在则只聚焦（不重复创建）。
+   * 位置按当前画板节点数自动排成网格，避免叠在一起。
+   */
+  const addMessageToBoard = useCallback(
+    (
+      conversationId: string,
+      messageId: string,
+      boardId?: string,
+      excerpt?: string
+    ): boolean => {
+      let created = false
+      setState((prev) => {
+        const targetBoardId = boardId ?? prev.activeBoardId
+        if (!targetBoardId) return prev
+        const exists = prev.boardNodes.some(
+          (n) =>
+            n.boardId === targetBoardId &&
+            n.ref?.conversationId === conversationId &&
+            n.ref?.messageId === messageId
+        )
+        if (exists) return prev
+        const siblings = prev.boardNodes.filter(
+          (n) => n.boardId === targetBoardId
+        )
+        const node = createBoardNode(
+          targetBoardId,
+          { conversationId, messageId },
+          siblings.length,
+          excerpt
+        )
+        created = true
+        return {
+          ...prev,
+          boardNodes: [...prev.boardNodes, node],
+          boards: prev.boards.map((b) =>
+            b.id === targetBoardId ? { ...b, updatedAt: Date.now() } : b
+          ),
+        }
+      })
+      return created
+    },
+    []
+  )
+
+  /**
+   * 把一段选中文字摘录进画板。
+   * 与 addMessageToBoard 的区别：节点只装片段（excerpt），但仍保留对源消息的引用，
+   * 因此既能溯源，又不会被整段长回答撑爆画布。
+   */
+  const addExcerptToBoard = useCallback(
+    (
+      conversationId: string,
+      messageId: string,
+      excerpt: string,
+      boardId: string
+    ): boolean => {
+      let created = false
+      const body = excerpt.trim()
+      if (!body) return false
+      setState((prev) => {
+        const siblings = prev.boardNodes.filter((n) => n.boardId === boardId)
+        const node = createBoardNode(
+          boardId,
+          { conversationId, messageId },
+          siblings.length,
+          body
+        )
+        created = true
+        return {
+          ...prev,
+          boardNodes: [...prev.boardNodes, node],
+          activeBoardId: boardId,
+          boards: prev.boards.map((b) =>
+            b.id === boardId ? { ...b, updatedAt: Date.now() } : b
+          ),
+        }
+      })
+      return created
+    },
+    []
+  )
+
+  /** 把整段对话按消息顺序铺成一条链，适合先得到骨架再整理 */
+  const addConversationToBoard = useCallback(
+    (conversationId: string, boardId?: string): number => {
+      let count = 0
+      setState((prev) => {
+        const targetBoardId = boardId ?? prev.activeBoardId
+        const conv = prev.conversations.find((c) => c.id === conversationId)
+        if (!targetBoardId || !conv) return prev
+        const existing = prev.boardNodes.filter(
+          (n) => n.boardId === targetBoardId
+        )
+        const seen = new Set(
+          existing
+            .map((n) =>
+              n.ref
+                ? `${n.ref.conversationId}:${n.ref.messageId}`
+                : null
+            )
+            .filter(Boolean) as string[]
+        )
+        const base = existing.length
+        const added: BoardNode[] = []
+        conv.messages.forEach((m) => {
+          const key = `${conversationId}:${m.id}`
+          if (seen.has(key)) return
+          seen.add(key)
+          // 纵向排列成一条链，右侧留出后续整理空间
+          const node = createBoardNode(targetBoardId, {
+            conversationId,
+            messageId: m.id,
+          }, 0)
+          added.push({
+            ...node,
+            x: 0,
+            y: (base + added.length) * (BOARD_NODE_H + 24),
+          })
+        })
+        if (added.length === 0) return prev
+        count = added.length
+        // 同一条对话相邻消息自动连 reference 边，形成骨架
+        const edges = [...prev.boardEdges]
+        for (let i = 1; i < added.length; i++) {
+          edges.push(
+            createBoardEdge(
+              targetBoardId,
+              added[i - 1].id,
+              added[i].id,
+              "reference"
+            )
+          )
+        }
+        return {
+          ...prev,
+          boardNodes: [...prev.boardNodes, ...added],
+          boardEdges: edges,
+          boards: prev.boards.map((b) =>
+            b.id === targetBoardId ? { ...b, updatedAt: Date.now() } : b
+          ),
+        }
+      })
+      return count
+    },
+    []
+  )
+
+  /** 新建便签 */
+  const addNote = useCallback((text: string, boardId?: string) => {
+    setState((prev) => {
+      const targetBoardId = boardId ?? prev.activeBoardId
+      if (!targetBoardId) return prev
+      const siblings = prev.boardNodes.filter(
+        (n) => n.boardId === targetBoardId
+      )
+      const col = siblings.length % BOARD_COLUMNS
+      const row = Math.floor(siblings.length / BOARD_COLUMNS)
+      const node = createNoteNode(
+        targetBoardId,
+        text,
+        col * (BOARD_NODE_W + BOARD_GAP_X),
+        row * (BOARD_NODE_H + BOARD_GAP_Y)
+      )
+      return {
+        ...prev,
+        boardNodes: [...prev.boardNodes, node],
+        boards: prev.boards.map((b) =>
+          b.id === targetBoardId ? { ...b, updatedAt: Date.now() } : b
+        ),
+      }
+    })
+  }, [])
+
+  /**
+   * 拖拽结束才提交坐标。
+   * 中途的 mousemove 不能进 state，否则每次移动都会序列化整个应用状态。
+   */
+  const moveNode = useCallback((nodeId: string, x: number, y: number) => {
+    setState((prev) => {
+      const target = prev.boardNodes.find((n) => n.id === nodeId)
+      if (!target) return prev
+      if (Math.round(target.x) === Math.round(x) && Math.round(target.y) === Math.round(y)) {
+        return prev
+      }
+      return {
+        ...prev,
+        boardNodes: prev.boardNodes.map((n) =>
+          n.id === nodeId ? { ...n, x, y } : n
+        ),
+      }
+    })
+  }, [])
+
+  const updateNode = useCallback(
+    (
+      nodeId: string,
+      patch: Partial<
+        Pick<
+          BoardNode,
+          "title" | "note" | "excerpt" | "expanded" | "width" | "height" | "contentOverride"
+        >
+      >
+    ) => {
+      setState((prev) => ({
+        ...prev,
+        boardNodes: prev.boardNodes.map((n) =>
+          n.id === nodeId ? { ...n, ...patch } : n
+        ),
+      }))
+    },
+    []
+  )
+
+  const removeNodes = useCallback((nodeIds: string[]) => {
+    const set = new Set(nodeIds)
+    setState((prev) => ({
+      ...prev,
+      boardNodes: prev.boardNodes.filter((n) => !set.has(n.id)),
+      boardEdges: prev.boardEdges.filter(
+        (e) => !set.has(e.from) && !set.has(e.to)
+      ),
+    }))
+  }, [])
+
+  /** 连接两个节点；不允许自环与重复边 */
+  /**
+   * 连接两个节点。
+   * 新建的线默认是 flow（可执行），因为画板的主要用途就是「材料→提示词→输出」；
+   * 想要纯视觉联系时用户可以在边菜单里改成「仅联系」。
+   */
+  const connectNodes = useCallback(
+    (
+      from: string,
+      to: string,
+      handles?: { sourceHandle?: string; targetHandle?: string }
+    ) => {
+      setState((prev) => {
+        if (from === to) return prev
+        const dup = prev.boardEdges.some((e) => e.from === from && e.to === to)
+        if (dup) return prev
+        const source = prev.boardNodes.find((n) => n.id === from)
+        if (!source) return prev
+        return {
+          ...prev,
+          boardEdges: [
+            ...prev.boardEdges,
+            createBoardEdge(source.boardId, from, to, "flow", handles),
+          ],
+        }
+      })
+    },
+    []
+  )
+
+  const removeEdge = useCallback((edgeId: string) => {
+    setState((prev) => ({
+      ...prev,
+      boardEdges: prev.boardEdges.filter((e) => e.id !== edgeId),
+      boardTasks: prev.boardTasks.map((t) =>
+        t.edgeIds.includes(edgeId)
+          ? { ...t, edgeIds: t.edgeIds.filter((id) => id !== edgeId) }
+          : t
+      ),
+    }))
+  }, [])
+
+  /* ---------------- 连线编辑 ---------------- */
+
+  const updateEdge = useCallback(
+    (edgeId: string, patch: Partial<Pick<BoardEdge, "prompt" | "enabled" | "kind" | "label">>) => {
+      setState((prev) => ({
+        ...prev,
+        boardEdges: prev.boardEdges.map((e) =>
+          e.id === edgeId ? { ...e, ...patch } : e
+        ),
+      }))
+    },
+    []
+  )
+
+  /** 切换「可执行 / 仅联系」 */
+  const toggleEdgeKind = useCallback((edgeId: string) => {
+    setState((prev) => ({
+      ...prev,
+      boardEdges: prev.boardEdges.map((e) =>
+        e.id === edgeId
+          ? { ...e, kind: e.kind === "flow" ? "manual" : "flow" }
+          : e
+      ),
+    }))
+  }, [])
+
+  const toggleEdgeEnabled = useCallback((edgeId: string) => {
+    setState((prev) => ({
+      ...prev,
+      boardEdges: prev.boardEdges.map((e) =>
+        e.id === edgeId ? { ...e, enabled: e.enabled === false } : e
+      ),
+    }))
+  }, [])
+
+  /* ---------------- 任务 ---------------- */
+
+  const addTask = useCallback((name?: string): BoardTask | null => {
+    let created: BoardTask | null = null
+    setState((prev) => {
+      if (!prev.activeBoardId) return prev
+      const task = createBoardTask(prev.activeBoardId, name || "新任务")
+      created = task
+      return {
+        ...prev,
+        boardTasks: [...prev.boardTasks, task],
+        activeTaskId: task.id,
+      }
+    })
+    return created
+  }, [])
+
+  const renameTask = useCallback((taskId: string, name: string) => {
+    setState((prev) => ({
+      ...prev,
+      boardTasks: prev.boardTasks.map((t) =>
+        t.id === taskId ? { ...t, name: name.trim() || t.name, updatedAt: Date.now() } : t
+      ),
+    }))
+  }, [])
+
+  const deleteTask = useCallback((taskId: string) => {
+    setState((prev) => {
+      const tasks = prev.boardTasks.filter((t) => t.id !== taskId)
+      return {
+        ...prev,
+        boardTasks: tasks,
+        activeTaskId:
+          prev.activeTaskId === taskId ? (tasks[0]?.id ?? null) : prev.activeTaskId,
+      }
+    })
+  }, [])
+
+  const selectTask = useCallback((taskId: string | null) => {
+    setState((prev) => ({ ...prev, activeTaskId: taskId }))
+  }, [])
+
+  /** 把边加入 / 移出任务 */
+  const toggleTaskEdge = useCallback((taskId: string, edgeId: string) => {
+    setState((prev) => ({
+      ...prev,
+      boardTasks: prev.boardTasks.map((t) => {
+        if (t.id !== taskId) return t
+        const has = t.edgeIds.includes(edgeId)
+        return {
+          ...t,
+          edgeIds: has
+            ? t.edgeIds.filter((id) => id !== edgeId)
+            : [...t.edgeIds, edgeId],
+          updatedAt: Date.now(),
+        }
+      }),
+    }))
+  }, [])
+
   const setSidebarView = useCallback((view: ChatState["sidebarView"]) => {
     setState((prev) => ({ ...prev, sidebarView: view }))
   }, [])
@@ -532,7 +1104,6 @@ export function useChatStore() {
   )
 
   /* ---------------- 设置 ---------------- */
-
   const updateSettings = useCallback(
     (patch: Partial<Pick<ChatState, "apiKey" | "baseUrl" | "model">>) => {
       setState((prev) => ({ ...prev, ...patch }))
@@ -822,6 +1393,202 @@ export function useChatStore() {
     []
   )
 
+  /* ---------------- 执行任务 ---------------- */
+
+  /** 解析节点的可读文本：改写优先，其次摘录，最后源消息 */
+  const nodeText = useCallback(
+    (node: BoardNode): string => {
+      if (node.contentOverride !== undefined && node.contentOverride !== "") {
+        return node.contentOverride
+      }
+      if (node.excerpt) return node.excerpt
+      if (node.kind === "note") return node.note ?? ""
+      const conv = state.conversations.find(
+        (c) => c.id === node.ref?.conversationId
+      )
+      const msg = conv?.messages.find((m) => m.id === node.ref?.messageId)
+      return msg?.content ?? ""
+    },
+    [state.conversations]
+  )
+
+  const [runningTaskId, setRunningTaskId] = useState<string | null>(null)
+
+  /**
+   * 执行任务：对任务内每条可执行的 flow 边**独立**发一次请求。
+   *
+   * 刻意不做拓扑串联：边是独立单元，一条失败不影响其他边，
+   * 结果各自写回自己的终点节点。这样「只跑一条」和「跑多条」是同一套语义。
+   */
+  const runTask = useCallback(
+    async (taskId: string) => {
+      if (streamingConvId || runningTaskId) return
+      const task = state.boardTasks.find((t) => t.id === taskId)
+      if (!task) return
+
+      const runnable = task.edgeIds
+        .map((id) => state.boardEdges.find((e) => e.id === id))
+        .filter((e): e is BoardEdge => !!e && isRunnableEdge(e))
+
+      if (runnable.length === 0) {
+        toast.info("任务里没有可执行的线（需要是「可执行」且未被禁用）")
+        return
+      }
+
+      if (!state.apiKey.trim()) {
+        toast.error("请先在设置里填写 DeepSeek API Key", {
+          action: { label: "去设置", onClick: () => openSettingsRef.current?.() },
+        })
+        return
+      }
+
+      setRunningTaskId(taskId)
+      const controller = new AbortController()
+      abortRef.current = controller
+
+      let ok = 0
+      let failed = 0
+
+      try {
+        for (const edge of runnable) {
+          const source = state.boardNodes.find((n) => n.id === edge.from)
+          const target = state.boardNodes.find((n) => n.id === edge.to)
+          if (!source || !target) {
+            failed++
+            continue
+          }
+
+          const inputText = nodeText(source)
+          if (!inputText.trim()) {
+            failed++
+            continue
+          }
+
+          const prompt = (edge.prompt ?? "").trim()
+          const content = prompt
+            ? `【材料】\n${inputText}\n\n【要求】\n${prompt}`
+            : inputText
+
+          const runId = uid("run")
+          const snapshot = {
+            edgeId: edge.id,
+            prompt,
+            inputs: [
+              {
+                nodeId: source.id,
+                title: source.title || source.kind,
+                text: inputText,
+              },
+            ],
+            createdAt: Date.now(),
+          }
+
+          try {
+            const result = await streamChat({
+              apiKey: state.apiKey,
+              baseUrl: state.baseUrl,
+              model: state.model,
+              messages: [{ id: runId, role: "user", content, createdAt: Date.now() }],
+              signal: controller.signal,
+              onDelta: () => {},
+            })
+
+            const run: NodeRun = {
+              id: runId,
+              ...snapshot,
+              output: result.content,
+            }
+            setState((prev) => ({
+              ...prev,
+              boardNodes: prev.boardNodes.map((n) => {
+                if (n.id !== target.id) return n
+                // 结果覆盖节点内容，同时保留历史
+                const prevRuns = n.runs ?? []
+                return {
+                  ...n,
+                  contentOverride: result.content,
+                  runs: [run, ...prevRuns].slice(0, 50),
+                }
+              }),
+            }))
+            ok++
+          } catch (err) {
+            const aborted = (err as Error)?.name === "AbortError"
+            if (aborted) break
+            failed++
+            const message = err instanceof Error ? err.message : String(err)
+            setState((prev) => ({
+              ...prev,
+              boardNodes: prev.boardNodes.map((n) => {
+                if (n.id !== target.id) return n
+                const run: NodeRun = {
+                  id: runId,
+                  ...snapshot,
+                  output: "",
+                  error: message,
+                }
+                return { ...n, runs: [run, ...(n.runs ?? [])].slice(0, 50) }
+              }),
+            }))
+          }
+        }
+      } finally {
+        abortRef.current = null
+        setRunningTaskId(null)
+      }
+
+      if (ok > 0 && failed === 0) {
+        toast.success(`已执行 ${ok} 条线`)
+      } else if (ok > 0) {
+        toast.warning(`成功 ${ok} 条，失败 ${failed} 条`)
+      } else if (failed > 0) {
+        toast.error(`${failed} 条线执行失败`)
+      }
+    },
+    [
+      state.boardTasks,
+      state.boardEdges,
+      state.boardNodes,
+      state.apiKey,
+      state.baseUrl,
+      state.model,
+      streamingConvId,
+      runningTaskId,
+      nodeText,
+    ]
+  )
+
+  const stopTask = useCallback(() => {
+    abortRef.current?.abort()
+    abortRef.current = null
+    setRunningTaskId(null)
+  }, [])
+
+  /** 回填某条历史到节点当前内容 */
+  const applyRun = useCallback((nodeId: string, runId: string) => {
+    setState((prev) => ({
+      ...prev,
+      boardNodes: prev.boardNodes.map((n) => {
+        if (n.id !== nodeId) return n
+        const run = n.runs?.find((r) => r.id === runId)
+        if (!run) return n
+        return { ...n, contentOverride: run.output }
+      }),
+    }))
+  }, [])
+
+  /** 清空引用节点的改写，回到原始消息内容 */
+  const restoreNodeContent = useCallback((nodeId: string) => {
+    setState((prev) => ({
+      ...prev,
+      boardNodes: prev.boardNodes.map((n) => {
+        if (n.id !== nodeId) return n
+        const { contentOverride: _c, ...rest } = n
+        return rest
+      }),
+    }))
+  }, [])
+
   const exportMarkdown = useCallback((conv: Conversation) => {
     const md = conv.messages
       .filter((m) => m.content.trim())
@@ -853,6 +1620,42 @@ export function useChatStore() {
     tags: state.tags,
     conversationTree,
     favoriteOf,
+    projectBoards,
+    activeBoard,
+    boardNodeEntries,
+    boardEdges,
+    boardTasks: state.boardTasks,
+    projectTasks,
+    activeTask,
+    setMainView,
+    addBoard,
+    selectBoard,
+    renameBoard,
+    deleteBoard,
+    addMessageToBoard,
+    addMessagesToBoard,
+    addExcerptToBoard,
+    addConversationToBoard,
+    addNote,
+    moveNode,
+    updateNode,
+    removeNodes,
+    connectNodes,
+    removeEdge,
+    updateEdge,
+    toggleEdgeKind,
+    toggleEdgeEnabled,
+    addTask,
+    renameTask,
+    deleteTask,
+    selectTask,
+    toggleTaskEdge,
+    runTask,
+    stopTask,
+    applyRun,
+    restoreNodeContent,
+    nodeText,
+    runningTaskId,
     activeConversation,
     streamingConvId,
     isStreaming: streamingConvId !== null,
@@ -861,6 +1664,7 @@ export function useChatStore() {
     deleteProject,
     selectProject,
     jumpToConversation,
+    jumpToMessage,
     addConversation,
     selectConversation,
     renameConversation,
@@ -893,3 +1697,26 @@ export function useChatStore() {
 }
 
 export type ChatStore = ReturnType<typeof useChatStore>
+
+/**
+ * 把某条消息滚到可视区并短暂高亮。
+ *
+ * 调用时机在 setState 之后，此时对话视图可能还没渲染出来，
+ * 因此用轮询等元素出现，而不是单次 requestAnimationFrame。
+ */
+function scrollMessageIntoView(messageId: string, timeout = 1500) {
+  const start = Date.now()
+  const tick = () => {
+    const el = document.querySelector(`[data-message-id='${messageId}']`)
+    if (el) {
+      el.scrollIntoView({ block: "center", behavior: "smooth" })
+      el.classList.add("msg-flash")
+      setTimeout(() => el.classList.remove("msg-flash"), 1200)
+      return
+    }
+    if (Date.now() - start < timeout) {
+      requestAnimationFrame(tick)
+    }
+  }
+  requestAnimationFrame(tick)
+}
