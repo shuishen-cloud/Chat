@@ -314,6 +314,56 @@ cases.resizePersists = async (t) => {
   t.ok(n.height > 100, `高度也被保存 (${n.height})`)
 }
 
+/**
+ * 从左边手柄向左拉：卡片应当向左长出去，右边缘不动。
+ *
+ * 曾经的 bug：受控模式下拖拽时不回写尺寸，React Flow 每次内部渲染
+ * 都用旧 width 覆盖，只把新的 x/y 吞下去，于是「往左拉，右边缘往右长」。
+ */
+cases.resizeLeftExpandsLeft = async (t) => {
+  await t.seed(seedTwoBoards())
+  await t.untilVisible(".react-flow__node[data-id='n2']")
+
+  const node = t.page.locator(".react-flow__node[data-id='n2']")
+  await node.click()
+  await t.page.waitForTimeout(200)
+
+  /** 节点（相对视口）的左右边缘 */
+  const edges = async () => {
+    const box = await node.boundingBox()
+    return { left: box.x, right: box.x + box.width, width: box.width }
+  }
+
+  const before = await edges()
+  const handle = t.page.locator(
+    ".react-flow__node[data-id='n2'] .react-flow__resize-control.left"
+  )
+  t.ok((await handle.count()) > 0, "选中后出现左侧缩放手柄")
+
+  const hb = await handle.first().boundingBox()
+  await t.page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2)
+  await t.page.mouse.down()
+  await t.page.mouse.move(hb.x - 120, hb.y + hb.height / 2, { steps: 10 })
+  const mid = await edges()
+  await t.page.mouse.up()
+
+  t.ok(mid.width > before.width + 60, `拖动中宽度已增大 (${before.width} → ${mid.width})`)
+  t.ok(mid.left < before.left - 60, `卡片是向左长的 (left ${before.left} → ${mid.left})`)
+  t.ok(Math.abs(mid.right - before.right) < 8, `右边缘基本不动 (${mid.right})`)
+
+  // 松手后宽度与坐标都要落库，刷新/重渲染后不能回弹
+  const s = await t.stateUntil(
+    (x) => {
+      const n = x.boardNodes.find((n) => n.id === "n2")
+      return n && n.width && n.width > 300
+    },
+    3000,
+    "左扩尺寸落库"
+  )
+  const n = s.boardNodes.find((x) => x.id === "n2")
+  t.ok(n.x < 400, `节点 x 已随左扩前移 (${n.x})`)
+}
+
 cases.jumpBackToMessage = async (t) => {
   await t.seed(seedTwoBoards())
   await t.untilVisible(".react-flow__node[data-id='n1']")

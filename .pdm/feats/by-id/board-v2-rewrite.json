@@ -1,0 +1,48 @@
+{
+  "slug": "board-v2-rewrite",
+  "title": "白板系统从零重写：单一数据源 + 交互状态机",
+  "kind": "feat",
+  "status": "testing",
+  "doc": "feat/board-v2-rewrite.md",
+  "api": [
+    "toFlow(doc: BoardDoc) -> Node<BoardCardData>[]; fromFlow(nodes, edges) -> BoardDoc; applyDocChange(doc, changes) -> BoardDoc; reduceInteraction(state, event) -> InteractionState"
+  ],
+  "logs": [
+    "缩放/拖拽结束时记录一次尺寸与坐标落库；v1→v2 迁移逐条统计成功与跳过数"
+  ],
+  "fallbacks": [
+    "迁移失败保留 v1 数据并回退到旧画板；快照写库失败提示重试，不丢内存态"
+  ],
+  "design_note": "现有白板是受控 React Flow + 业务 store 的双层状态，靠 5 处补偿补丁维持一致，导致拖拽/缩放/选中反复出 bug。v2 以 React Flow store 为唯一数据源，业务字段进 data，持久化只做快照导出。",
+  "impl_note": "分模块重写 board-v2：model(纯函数/不变量) → interaction(状态机) → view(渲染) → persist(快照与迁移)；旧画板保留为双轨，用 feature flag 切换。",
+  "data_model": [
+    "BoardDoc: {nodes: BoardNode[], edges: BoardEdge[]}；RtNode = Node<BoardCardData>；BoardCardData: {card, onAction}；InteractionState: idle|dragging|resizing|connecting|selecting|marquee"
+  ],
+  "samples": [
+    "{\"nodes\":[{\"id\":\"n1\",\"type\":\"message\",\"position\":{\"x\":0,\"y\":0},\"width\":260,\"data\":{\"card\":{\"kind\":\"message\",\"ref\":{\"conversationId\":\"c1\",\"messageId\":\"m2\"}}}}],\"edges\":[]}"
+  ],
+  "changes": [
+    "src/features/board-v2/model/__/ —— 领域模型与不变量纯函数",
+    "src/features/board-v2/interaction/__/ —— 交互状态机",
+    "src/features/board-v2/view/__/ —— 画布与卡片渲染",
+    "src/features/board-v2/persist/__/ —— 快照导出与 v1 迁移"
+  ],
+  "test_note": "node:test 覆盖 model/reduceInteraction 纯函数不变量（向左拉伸右边缘不变、拖拽不改尺寸等）；Playwright 几何断言覆盖拖拽/缩放/连线/多选的手感",
+  "debug_note": "",
+  "extend_note": "",
+  "impact": "新增 src/features/board-v2 独立目录；旧 board-canvas/board-panel 保留不动，通过 feature flag 切换；数据层新增 boardDoc 持久化字段并保留 v1 迁移通道",
+  "importance": "high",
+  "commits": [
+    "45cfb785f85a60a4e0d5499c56c02a77b2cfa14a",
+    "85e15329b731d238f5f7243c3b6898e3fbd6211c",
+    "2acae31f69e24354643a02a73fa8da77e24ba89f"
+  ],
+  "notes": [],
+  "discovered": [],
+  "stage": "feat",
+  "reviews": {},
+  "comments": {},
+  "stage_reviews": {},
+  "created_at": "2026-11-12T12:40:34.623552+00:00",
+  "updated_at": "2026-11-12T12:52:05.458357+00:00"
+}

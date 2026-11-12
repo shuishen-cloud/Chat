@@ -79,7 +79,7 @@ entries(业务 store)  →  nodes(每次 map 重建)  →  localNodes(本地副�
 领域模型只保留**真正需要持久化**的字段，坐标尺寸与选中归框架：
 
 ```ts
-// 持久化领域模型（磁盘格式，v1 兼容）
+// 持久化领域模型（唯一的磁盘格式）
 type BoardCard =
   | { kind: "message"; ref: { conversationId: string; messageId: string };
       title?: string; excerpt?: string; contentOverride?: string;
@@ -163,23 +163,24 @@ src/features/board-v2/
     cards/NoteCard.tsx
     handles.tsx     四向手柄（单一命中区实现，不再叠三层）
   persist/
-    snapshot.ts     快照导出（debounce）
-    migrate.ts      v1 → v2
-  index.ts          对外出口 + feature flag
+    snapshot.ts     快照导出（debounce）与读取
+  index.ts          对外出口
 ```
 
 **度量约束**：任一文件 ≤ 300 行；`view/` 不含业务判断，
 `model/` 不含 React import。这两条用脚本检查。
 
-### 六、双轨与切换
+### 六、直接替换，不做双轨
 
-旧画板（`board-canvas.tsx` / `board-panel.tsx`）**不动**。
-新增 `use-board-v2` flag（localStorage 布尔）：
+**v2 直接接管画板，旧实现删除，不保留双轨、不做数据迁移、不留 feature flag。**
 
-- `false`（默认）：走旧画板；
-- `true`：走 board-v2，读写同一份 v1 磁盘数据（经 `migrate.ts` 内存转换）。
-
-好处：可以随时回退，且**两套实现能并排对比同一份数据**，出问题好定位。
+- 旧 `board-canvas.tsx`、`board-panel.tsx` 中与 v2 重叠的部分**整体删除**，
+  不留在仓库里“以备回退”——回退靠 git 历史，不靠并存代码。
+  （理由：并存两套会让后来者不知道改哪一套，正是本次要消灭的债务形态。）
+- 旧的 `boardNodes / boardEdges / boardTasks` 磁盘字段**不再读取**：
+  启动时若检测到旧字段，直接丢弃并记录一条 warning（用户已知无需保留）。
+- 画板侧栏按钮、任务栏、工具栏等**产品功能全部保留**，只是渲染实现换成 v2；
+  不允许因为重写而丢功能。
 
 ### 七、画布（viewport）也归框架
 
@@ -214,9 +215,6 @@ export function canStart(state: Interaction, want: Interaction["type"]): boolean
 // persist/snapshot.ts
 export function serialize(doc: BoardDoc): string
 export function deserialize(raw: string): BoardDoc | null
-
-// persist/migrate.ts
-export function migrateV1(state: unknown): { doc: BoardDoc; skipped: number }
 ```
 
 调用方：`view/BoardCanvas2.tsx` 只负责把 DOM 事件翻译成 `InteractionEvent`、
@@ -225,14 +223,14 @@ export function migrateV1(state: unknown): { doc: BoardDoc; skipped: number }
 ## 日志
 
 - 拖拽/缩放结束：记录一次 `{nodeId, x, y, width, height}` 的落库（debug 级）。
-- v1→v2 迁移：记录成功条数与跳过条数；跳过项写 id 与原因。
+- 启动时发现旧画板字段：记录一条 warning（字段名 + 条数），说明已丢弃。
 - 状态机非法转移（如 `resizing` 收到 `dragging` 启动）：记录一条 warning，
   这通常意味着某个组件绕过状态机直接挂了事件——是设计要抓的 bug。
 - 快照写库失败：记录错误，保留内存态，UI 提示可重试。
 
 ## 兜底
 
-- **迁移失败**：整体回退到 v1 数据与旧画板（flag 复位），不让用户丢数据。
+- **旧字段残留**：不读取、不写入；记录 warning 后忽略，不做迁移。
 - **快照写库失败**（配额/隐私模式）：捕获后提示"改动未保存"，内存态继续可用；
   下次成功写库时补上。
 - **未知卡片 kind**：渲染为占位卡片，保留数据不删除，避免前向不兼容丢字段。
