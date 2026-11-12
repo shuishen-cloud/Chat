@@ -35,14 +35,16 @@
   "importance": "high",
   "commits": [
     "853b04311a12e3abbe8c2b9562f49919d430557b",
-    "3a7814d7383283e115650eb658f78e952cf454af"
+    "3a7814d7383283e115650eb658f78e952cf454af",
+    "a1ee59143158e638fd516c63155d3db8ae647802",
+    "0fd7f5d4810d8a610b473923ec26d2e1c97647a3"
   ],
   "notes": [],
   "discovered": [],
-  "stage": "test",
+  "stage": "fix",
   "reviews": {},
   "comments": {},
   "stage_reviews": {},
   "created_at": "2026-11-12T13:42:58.207036+00:00",
-  "updated_at": "2026-11-12T13:44:59.755043+00:00"
+  "updated_at": "2026-11-12T13:58:10.211238+00:00"
 }

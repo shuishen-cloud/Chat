@@ -1,0 +1,141 @@
+{
+  "commit": "a1ee5914",
+  "notes": [
+    {
+      "commit": "a1ee5914",
+      "kind": "pitfall",
+      "title": "手柄做成 20×20 命中盒，导致所有连线端点偏移 10px 画到卡片外",
+      "detail": "React Flow 量测手柄时取元素左上角当端点（@xyflow/system getHandleBounds → getHandlePosition）。只有手柄尺寸趋近 0 时左上角才等于视觉中心。原先把 board2-handle 做成 20×20 命中盒，顶部手柄端点变成 y=-10，线画在卡片上方空白处，且路径退化导致点击/长按都点不中。修法：手柄元素回到 1×1（左上角=中心），视觉圆点与 22×22 命中区都用伪元素 ::before/::after 绘制——伪元素不参与 getBoundingClientRect 量测。",
+      "author": "human:unknown",
+      "files": [
+        "src/index.css"
+      ],
+      "severity": "high",
+      "status": "noted",
+      "catches": [],
+      "verifications": [
+        {
+          "kind": "test",
+          "target": "manual:打开画板看连线是否从卡片边缘出发",
+          "command": "",
+          "method": "node /tmp/where.cjs 比较 edge-path 的 d 与节点屏幕位置",
+          "script": "",
+          "expected": "y 从 -10 变为 -0.5，线与卡片对齐",
+          "note": "",
+          "cwd": "",
+          "last_run_at": null,
+          "last_status": "unknown",
+          "last_output": ""
+        }
+      ],
+      "issue_id": null,
+      "resolves": [],
+      "tags": [
+        "board-v2/handles"
+      ],
+      "created_at": "2026-11-12T13:57:55.217686+00:00"
+    },
+    {
+      "commit": "a1ee5914",
+      "kind": "pitfall",
+      "title": "长按热区只放在线中点，按在线的其他位置完全没反应",
+      "detail": "第一版把长按/点击手势挂在 EdgeLabelRenderer 的中点徽章上（约 42×23）。用户按在线的其它位置时事件根本到不了，表现为『长按线条没反应，但长按提示词框能编辑』。修法：沿整条贝塞尔路径铺一条 26px 宽的透明描边 <path stroke=transparent strokeWidth=26 pointer-events=stroke>，线有多长可长按范围就有多长；中点徽章保留为第二条路径（文字上也按得中）。同时关掉框架自带的 interactionWidth（设为 0）避免两层热区重复派发。",
+      "author": "human:unknown",
+      "files": [
+        "src/features/board-v2/view/board-canvas.tsx"
+      ],
+      "severity": "high",
+      "status": "noted",
+      "catches": [],
+      "verifications": [
+        {
+          "kind": "test",
+          "target": "manual:沿路径取 t=0.2/0.35/0.5/0.65/0.8 五点各长按 650ms",
+          "command": "",
+          "method": "node /tmp/lp.cjs",
+          "script": "",
+          "expected": "t=0.35~0.8 均弹出编辑器，且不触发执行请求",
+          "note": "",
+          "cwd": "",
+          "last_run_at": null,
+          "last_status": "unknown",
+          "last_output": ""
+        }
+      ],
+      "issue_id": null,
+      "resolves": [],
+      "tags": [
+        "board-v2/edges"
+      ],
+      "created_at": "2026-11-12T13:57:58.877162+00:00"
+    },
+    {
+      "commit": "a1ee5914",
+      "kind": "bug",
+      "title": "点击一次线发出两次执行请求（两个 NodeRun）",
+      "detail": "命中块的 pointerup 与 React Flow 的 onEdgeClick 是同一手势的两条路径，前者立刻执行、后者又派发一次，导致重复请求。修法：手势被命中块处理后记 lastHandledAtRef 时间戳，onEdgeClick 兜底路径在 400ms 内直接 return。另外长按触发后抬手必须不执行：LongPressTracker.up() 仅在 timer 仍 pending 时才回调 onPress，已触发过长按时 timer 已被置空。",
+      "author": "human:unknown",
+      "files": [
+        "src/features/board-v2/view/board-canvas.tsx"
+      ],
+      "severity": "high",
+      "status": "noted",
+      "catches": [],
+      "verifications": [
+        {
+          "kind": "test",
+          "target": "manual:单击线上非徽章位置一次",
+          "command": "",
+          "method": "node /tmp/lp.cjs 观察 requests 数量",
+          "script": "",
+          "expected": "请求数为 1，长按后抬起请求数为 0",
+          "note": "",
+          "cwd": "",
+          "last_run_at": null,
+          "last_status": "unknown",
+          "last_output": ""
+        }
+      ],
+      "issue_id": null,
+      "resolves": [],
+      "tags": [
+        "board-v2/edges"
+      ],
+      "created_at": "2026-11-12T13:57:58.935133+00:00"
+    },
+    {
+      "commit": "a1ee5914",
+      "kind": "pitfall",
+      "title": "Playwright 把 SVG <g>/<path> 判为 hidden，等待 .react-flow__edge 永远超时",
+      "detail": "test-board.cjs 里 await t.untilVisible('.react-flow__edge') 与 .react-flow__edge-path 全部失败：SVG 元素没有 CSS 布局盒，getBoundingClientRect 宽高为 0，Playwright 的可见性判定直接给 hidden。这不是产品 bug，但会让人误以为连线坏了（HEAD 上这些用例本来就是红的）。修法：等待与点击统一改用 .board-edge-hit（真实可交互的 HTML 命中块）；同时因为语义改为『长按=编辑』，新增 harness 方法 longPressEdge() 供所有『要改这条线』的用例使用，click 保留给『点击=执行』。",
+      "author": "human:unknown",
+      "files": [
+        "scripts/test-board.cjs"
+      ],
+      "severity": "medium",
+      "status": "noted",
+      "catches": [],
+      "verifications": [
+        {
+          "kind": "test",
+          "target": "scripts/test-board.cjs",
+          "command": "",
+          "method": "CASE=editEdgePrompt node scripts/test-board.cjs",
+          "script": "",
+          "expected": "1/1 通过",
+          "note": "",
+          "cwd": "",
+          "last_run_at": null,
+          "last_status": "unknown",
+          "last_output": ""
+        }
+      ],
+      "issue_id": null,
+      "resolves": [],
+      "tags": [
+        "board-v2/tests"
+      ],
+      "created_at": "2026-11-12T13:58:01.958927+00:00"
+    }
+  ]
+}
