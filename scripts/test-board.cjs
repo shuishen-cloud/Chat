@@ -195,6 +195,134 @@ const cases = {
 
 /* ---------------- 回归用例 ---------------- */
 
+/**
+ * 分支场景种子：c1 有 m1/m2，从 m1 分支出 c2（历史复制后消息 id 变了）。
+ * 画板上已放 c1.m1（父卡片 n1）、c1.m2（n2）与一张便签。
+ * 再往画板加入分支对话 c2 的回答时，新卡不得压到任何已有卡片上。
+ */
+function seedBranch() {
+  const now = Date.now()
+  const s = seedWithBoard({
+    conversations: [
+      defaultSeed().conversations[0],
+      {
+        id: "c2",
+        projectId: "p1",
+        title: "状态管理（分支）",
+        createdAt: now,
+        updatedAt: now,
+        branchedFrom: {
+          conversationId: "c1",
+          conversationTitle: "状态管理",
+          messageId: "m1",
+        },
+        messages: [
+          { id: "x1", role: "user", content: "推荐一个状态管理方案", createdAt: now },
+          { id: "x2", role: "assistant", content: "改用 Jotai 试试。", createdAt: now },
+        ],
+      },
+    ],
+    boardNodes: [
+      { id: "n1", boardId: "b1", kind: "message", ref: { conversationId: "c1", messageId: "m1" }, x: 0, y: 0, createdAt: now },
+      { id: "n2", boardId: "b1", kind: "message", ref: { conversationId: "c1", messageId: "m2" }, x: 320, y: 0, createdAt: now },
+      { id: "n3", boardId: "b1", kind: "note", note: "对比三者", x: 0, y: 220, createdAt: now },
+    ],
+    boardEdges: [],
+    activeBoardId: "b1",
+    mainView: "board",
+  })
+  return s
+}
+
+/**
+ * 加入分支对话的消息后，新卡片必须落在空位上。
+ *
+ * 回归点：旧实现按「已有卡片数」取模算网格坐标，与画布真实几何无关，
+ * 加入分支消息时新卡直接压在已有卡片上（用户反馈的「都堆叠在一起」）。
+ */
+cases.branchMessageDoesNotOverlap = async (t) => {
+  await t.seed(seedBranch())
+  await t.untilVisible(".react-flow__node")
+
+  // 切到分支对话，把分支里的回答加入画板
+  await t.page
+    .locator("aside")
+    .getByRole("button", { name: /状态管理（分支）/ })
+    .first()
+    .click()
+  await t.page
+    .locator("[data-message-id='x2']")
+    .getByRole("button", { name: "加入画板" })
+    .click()
+
+  await t.untilState((s) => s.boardNodes.length === 4, 3000, "分支消息已加入")
+  await t.untilCount(".react-flow__node", 4)
+  await t.settle()
+
+  const boxes = await t.page.evaluate(() =>
+    Array.from(document.querySelectorAll(".react-flow__node")).map((el) => {
+      const r = el.getBoundingClientRect()
+      return { id: el.dataset.id, x: r.x, y: r.y, w: r.width, h: r.height }
+    })
+  )
+  t.eq(boxes.length, 4, "画布上 4 张卡片")
+
+  // 两两比对屏幕矩形：任何重叠都算失败（留 1px 容差抵抗亚像素取整）
+  for (let i = 0; i < boxes.length; i++) {
+    for (let j = i + 1; j < boxes.length; j++) {
+      const a = boxes[i]
+      const b = boxes[j]
+      const overlap =
+        a.x < b.x + b.w - 1 &&
+        b.x < a.x + a.w - 1 &&
+        a.y < b.y + b.h - 1 &&
+        b.y < a.y + a.h - 1
+      t.ok(!overlap, `卡片 ${a.id} 与 ${b.id} 重叠：${JSON.stringify([a, b])}`)
+    }
+  }
+
+  // 分支卡片应落在父卡片（c1.m1 → n1）的右侧，体现分支关系
+  const s = await t.state()
+  const added = s.boardNodes.find((n) => n.ref?.conversationId === "c2")
+  t.ok(!!added, "分支消息节点已落库")
+  const parent = s.boardNodes.find((n) => n.id === "n1")
+  t.ok(added.x > parent.x, `分支卡片在父卡片右侧 (${added.x} > ${parent.x})`)
+}
+
+/** 删掉中间卡片后，新便签仍不得压在现存卡片上（旧实现 index 回流） */
+cases.newCardAvoidsAfterDelete = async (t) => {
+  await t.seed(seedBranch())
+  await t.untilVisible(".react-flow__node")
+
+  // 删掉 n2，让「已有卡片数」回到会与 n3 重合的值
+  await t.page.locator(".react-flow__node[data-id='n2']").getByTitle("从画板移除").click()
+  await t.untilState((s) => s.boardNodes.length === 2, 3000, "n2 已删除")
+
+  await t.page.getByRole("button", { name: "新建便签" }).click()
+  await t.untilState((s) => s.boardNodes.length === 3, 3000, "便签已加入")
+  await t.untilCount(".react-flow__node", 3)
+  await t.settle()
+
+  const boxes = await t.page.evaluate(() =>
+    Array.from(document.querySelectorAll(".react-flow__node")).map((el) => {
+      const r = el.getBoundingClientRect()
+      return { id: el.dataset.id, x: r.x, y: r.y, w: r.width, h: r.height }
+    })
+  )
+  for (let i = 0; i < boxes.length; i++) {
+    for (let j = i + 1; j < boxes.length; j++) {
+      const a = boxes[i]
+      const b = boxes[j]
+      const overlap =
+        a.x < b.x + b.w - 1 &&
+        b.x < a.x + a.w - 1 &&
+        a.y < b.y + b.h - 1 &&
+        b.y < a.y + a.h - 1
+      t.ok(!overlap, `删卡后新便签压到了 ${b.id}：${JSON.stringify([a, b])}`)
+    }
+  }
+}
+
 /** 两个画板的种子数据，用于验证切换 */
 function seedTwoBoards() {
   const now = Date.now()
