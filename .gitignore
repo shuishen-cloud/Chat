@@ -33,3 +33,6 @@ playwright-report
 test-results
 .verify/
 
+
+# 自托管字体：本地与服务器各自 scp，不入库（9.8MB）
+public/fonts/
