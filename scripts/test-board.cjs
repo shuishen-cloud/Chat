@@ -71,6 +71,11 @@ const cases = {
     t.eq(s.boardEdges.length, 1, "相邻消息自动连 reference 边")
     t.eq(s.boardEdges[0].kind, "reference", "边类型为 reference")
 
+    // 提问在左、回答在右：默认种子是 m1(user) → m2(assistant)
+    const [user, assistant] = s.boardNodes
+    t.ok(assistant.x > user.x, `回答在提问右侧 (${assistant.x} > ${user.x})`)
+    t.ok(assistant.y > user.y, "回答在提问下方（纵向交错）")
+
     // 再点一次不应新增
     await t.page.getByRole("button", { name: "当前对话全部加入" }).click()
     await t.page.waitForTimeout(300)
@@ -1785,5 +1790,16 @@ cases.huePopoverFlipsAtBottom = async (t) => {
   if (m.vh - 226 > 100) t.eq(m.side, "top", "节点贴底时向上翻转")
 }
 
-runAll(cases)
+/** CASE=xxx 只跑单个用例；CASE=--list 列出用例名 */
+const only = process.env.CASE
+if (only === "--list") {
+  console.log("可用用例:\n  " + Object.keys(cases).join("\n  "))
+  process.exit(0)
+}
+if (only && !cases[only]) {
+  console.error(`未知用例: ${only}\n可用: ${Object.keys(cases).join(", ")}`)
+  process.exit(1)
+}
+
+runAll(cases, only ? { only } : {})
 console.log("URL:", URL)

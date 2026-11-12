@@ -238,6 +238,100 @@ export function placeCard(input: PlaceInput): Point {
   return { x: right + gap, y: top + MAX_CANDIDATES * stepY }
 }
 
+/* ---------------- 对话导入：提问/回答左右交错 ---------------- */
+
+/**
+ * 交错布局里左右两列的纵向错位比例。
+ *
+ * 0.5 会让每一行多占半张卡高，四条消息就多出近一整张卡的空白。
+ * 取 0.28：错位感仍然明显（看得出左右交替），但不至于把画布拉长。
+ */
+export const ZIGZAG_OFFSET_Y = 0.28
+
+/**
+ * 左右两列之间的水平间距。
+ *
+ * 画板默认宽度只有 620px，两列卡片各 260 就吃掉 520，留给间距的余量很小。
+ * 这里取 56：既能放下连线，又不至于把右列推出可视区。
+ */
+export const ZIGZAG_GAP_X = 40
+
+export type ChatItem = {
+  /** 消息角色：决定放左列还是右列 */
+  role: "user" | "assistant"
+  size: Size
+}
+
+/**
+ * 导入整段对话时的落点：**提问靠左、回答靠右，纵向交错成之字形**。
+ *
+ * 形态（正是用户要的效果）：
+ *
+ * ```
+ *   提问1 ⌉
+ *         ⌊ 回答2
+ *   提问3 ⌉      ⌊ 回答4
+ *         ⌊ 回答2'
+ * ```
+ *
+ * 规则：
+ *  - `user`（提示词）固定放左列，`assistant`（回答）固定放右列；
+ *  - 第 i 张的纵向位置 = i × 步长，左右列再各自错开半行，
+ *    这样同一列里相邻两张不会贴着，阅读顺序沿着连线自然往下；
+ *  - 左右列宽取各自最宽的那张，避免长回答把右列挤歪。
+ *
+ * 返回顺序与 `items` 一致。
+ */
+export function placeChat(input: {
+  items: ReadonlyArray<ChatItem>
+  cards?: ReadonlyArray<Rect>
+  gap?: number
+}): Point[] {
+  if (input.items.length === 0) return []
+
+  const gap = Math.max(0, finite(input.gap ?? LAYOUT_GAP, LAYOUT_GAP))
+  const colWidth = { user: 0, assistant: 0 }
+  for (const it of input.items) {
+    const size = normSize(it.size)
+    colWidth[it.role] = Math.max(colWidth[it.role], size.width)
+  }
+
+  // 左列从 0 开始，右列接在左列右侧
+  const leftX = 0
+  const rightX = Math.max(colWidth.user, 1) + ZIGZAG_GAP_X
+
+  /** 每张卡片的纵向位置：按序号累加，行高取该张的高度 */
+  const y: number[] = []
+  let cursor = 0
+  for (let i = 0; i < input.items.length; i++) {
+    const size = normSize(input.items[i].size)
+    // 左右列错开半张卡：交错感来自这里
+    const stagger = input.items[i].role === "user" ? 0 : Math.round(size.height * ZIGZAG_OFFSET_Y)
+    y[i] = cursor + stagger
+    cursor += size.height + gap
+  }
+
+  const points: Point[] = input.items.map((it, i) => ({
+    x: it.role === "user" ? leftX : rightX,
+    y: y[i],
+  }))
+
+  /* 整体避开画布上已有卡片：整块平移，不逐张挤 */
+  const cards = (input.cards ?? []).map((c) => normRect(c)).filter((c): c is Rect => !!c)
+  if (cards.length === 0) return points
+
+  const maxX = Math.max(...points.map((p) => p.x)) + Math.max(colWidth.user, colWidth.assistant)
+  const height = Math.max(cursor - gap, 1)
+  let offset = { x: Math.min(...cards.map((c) => c.x)), y: Math.min(...cards.map((c) => c.y)) }
+  const band = (): Rect => ({ x: offset.x, y: offset.y, width: Math.max(maxX + 1, 1), height })
+
+  for (let i = 0; i < MAX_CANDIDATES && hitsAny(band(), cards); i++) {
+    offset = { x: offset.x, y: offset.y + height + gap }
+  }
+
+  return points.map((p) => ({ x: p.x + offset.x, y: p.y + offset.y }))
+}
+
 /* ---------------- 分支父卡片 ---------------- */
 
 type CardRefLike = { id: string; ref?: { conversationId: string; messageId: string } }

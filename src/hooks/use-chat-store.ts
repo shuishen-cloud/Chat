@@ -7,6 +7,7 @@ import {
   findBranchParent,
   findPreviousCard,
   placeCard,
+  placeChat,
   type Slot,
 } from "@/features/board-v2/model/layout"
 import {
@@ -975,34 +976,34 @@ export function useChatStore() {
             )
             .filter(Boolean) as string[]
         )
-        const added: BoardNode[] = []
-        // 整条链逐张落位：第一张找空位，后续接在前一张下方且同样避让已有卡片
-        const occupied: Slot[] = []
-        conv.messages.forEach((m) => {
-          const key = `${conversationId}:${m.id}`
-          if (seen.has(key)) return
-          seen.add(key)
-          /*
-           * 传入「已有卡片 + 本批已排好的卡片」，让 findPreviousCard 能看到
-           * 刚加入的上一条，从而把同一个对话的消息纵向串起来。
-           * 只用 existing 的话，循环里每条都找不到前驱，各自去扫描空位，
-           * 结果就是并排而不是竖排。
-           */
-          const siblings = [...existing, ...added]
-          const at = planPlacement(siblings, { conversationId, messageId: m.id, occupied })
-          const node = createBoardNode(
+        const fresh = conv.messages.filter((m) => !seen.has(`${conversationId}:${m.id}`))
+        if (fresh.length === 0) return prev
+
+        /*
+         * 提问靠左、回答靠右，纵向交错成之字形——这是用户要的「提示词与回答
+         * 交错」形态：像聊天记录一样，一眼能看出哪句是问、哪句是答。
+         *
+         * 交给纯函数算坐标，store 只负责落地。
+         */
+        const size = { width: BOARD_NODE_W_DEFAULT, height: BOARD_NODE_H_DEFAULT }
+        const points = placeChat({
+          items: fresh.map((m) => ({ role: m.role, size })),
+          cards: existing.map((n) => ({
+            x: n.x,
+            y: n.y,
+            width: n.width ?? size.width,
+            height: n.height ?? size.height,
+          })),
+          gap: LAYOUT_GAP,
+        })
+
+        const added: BoardNode[] = fresh.map((m, i) => {
+          seen.add(`${conversationId}:${m.id}`)
+          return createBoardNode(
             targetBoardId,
             { conversationId, messageId: m.id },
-            at
+            points[i] ?? { x: 0, y: 0 }
           )
-          added.push(node)
-          occupied.push({
-            id: node.id,
-            x: at.x,
-            y: at.y,
-            width: BOARD_NODE_W_DEFAULT,
-            height: BOARD_NODE_H_DEFAULT,
-          })
         })
         if (added.length === 0) return prev
         count = added.length

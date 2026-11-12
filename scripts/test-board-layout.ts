@@ -13,6 +13,7 @@ import {
   LAYOUT_GAP,
   findBranchParent,
   overlaps,
+  placeChat,
   placeCard,
   type Rect,
 } from "../src/features/board-v2/model/layout.ts"
@@ -251,4 +252,70 @@ test("findBranchParent：父对话已不存在 / 下标越界时返回 null", ()
   assert.equal(findBranchParent("c2", "x4", conversations, cards), null)
   assert.equal(findBranchParent("c2", "missing", conversations, cards), null)
   assert.equal(findBranchParent("c2", "x4", [], cards), null)
+})
+
+/* ---------------- 对话导入：提问/回答左右交错 ---------------- */
+
+test("placeChat：提问固定在左列，回答固定在右列", () => {
+  const pts = placeChat({
+    items: [
+      { role: "user", size: SIZE },
+      { role: "assistant", size: SIZE },
+      { role: "user", size: SIZE },
+      { role: "assistant", size: SIZE },
+    ],
+  })
+  assert.equal(pts.length, 4)
+  const leftX = pts[0].x
+  const rightX = pts[1].x
+  assert.ok(rightX > leftX, "回答列在提问列右侧")
+  assert.equal(pts[2].x, leftX, "第 3 条（提问）回到左列")
+  assert.equal(pts[3].x, rightX, "第 4 条（回答）回到右列")
+})
+
+test("placeChat：纵向严格递增，阅读顺序不会倒挂", () => {
+  const pts = placeChat({
+    items: Array.from({ length: 6 }, (_, i) => ({
+      role: i % 2 === 0 ? ("user" as const) : ("assistant" as const),
+      size: SIZE,
+    })),
+  })
+  for (let i = 1; i < pts.length; i++) {
+    assert.ok(pts[i].y > pts[i - 1].y, `第 ${i + 1} 条应在第 ${i} 条下方`)
+  }
+})
+
+test("placeChat：相邻提问之间不重叠，相邻回答之间不重叠", () => {
+  const pts = placeChat({
+    items: Array.from({ length: 6 }, (_, i) => ({
+      role: i % 2 === 0 ? ("user" as const) : ("assistant" as const),
+      size: SIZE,
+    })),
+  })
+  const boxes = pts.map((p) => ({ x: p.x, y: p.y, ...SIZE }))
+  for (let i = 0; i < boxes.length; i++) {
+    for (let j = i + 1; j < boxes.length; j++) {
+      const a = boxes[i]
+      const b = boxes[j]
+      const hit = a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height
+      assert.equal(hit, false, `第 ${i + 1} 与第 ${j + 1} 条重叠`)
+    }
+  }
+})
+
+test("placeChat：整段对话避开画布上已有卡片", () => {
+  const existing: Rect[] = [{ x: 0, y: 0, width: 400, height: 400 }]
+  const pts = placeChat({
+    items: [
+      { role: "user", size: SIZE },
+      { role: "assistant", size: SIZE },
+      { role: "user", size: SIZE },
+    ],
+    cards: existing,
+  })
+  for (const p of pts) assertNoOverlap(p, existing, "交错布局避让")
+})
+
+test("placeChat：空输入返回空数组", () => {
+  assert.deepEqual(placeChat({ items: [] }), [])
 })
