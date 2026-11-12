@@ -139,3 +139,58 @@ Playwright 用例 `huePopoverNotClipped`：
 
 顺带回归：`cases.colorMarks` / `cases.colorConversation` / 边提示词配色用例
 不能因为 `HuePicker` 加参数而变红。
+
+## 实现与校验结果
+
+### 落地情况
+
+| 文件 | 变更 |
+|---|---|
+| `src/components/ui/floating-layer.tsx` | 新增。`createPortal` 到 body + `fixed` 定位，auto-flip、resize/scroll/wheel 重算、点外部与 Esc 关闭 |
+| `src/components/hue-picker.tsx` | 新增 `layout?: "row" | "column"`，默认 `row` 不改变既有调用点 |
+| `src/components/board/node-hue-button.tsx` | 弹层改用 `FloatingLayer`，`layout="column"` 纵向单列 |
+
+边编辑器（`edge-editor.tsx`）与会话右键菜单（`chat-sidebar.tsx`）继续用默认
+`row`：它们本来就不在裁剪容器里，横向更省空间。
+
+### 与设计的偏差
+
+**1. 首帧不渲染用 `visibility: hidden` 而非「完全不渲染」。**
+必须先把浮层挂到 DOM 才能量到真实宽高（宽度由内容决定），但此时坐标未知。
+用 `visibility: hidden` 占位测量、拿到 `rect` 后再揭晓，比「先渲染一次再移除」
+少一次布局抖动。
+
+**2. 额外监听 `wheel` 与 `pointerup`。**
+React Flow 的平移/缩放走 `transform`，不触发 `scroll` 事件，只监听 `scroll`
+会让弹层在平移后"飘"在原地。加上 `wheel`（缩放）与 `pointerup`（拖拽结束）
+覆盖这两条路径。
+
+**3. 颜色按钮加 `aria-expanded`。**
+弹层脱离 DOM 树后，读屏器无从判断按钮与弹层的关系，补一个展开态。
+
+### 校验
+
+```
+CASE=huePopoverNotClipped node scripts/test-board.cjs     # ✓
+CASE=huePopoverCloses node scripts/test-board.cjs         # ✓
+CASE=huePopoverFlipsAtBottom node scripts/test-board.cjs  # ✓
+node scripts/test-board.cjs        # 46/46 通过
+node scripts/test-quick-ask.cjs    # 12/12 通过
+npm run build                      # 通过
+npx tsc -b --noEmit                # 通过
+```
+
+关键断言用 `document.elementFromPoint(色点中心)` 判断命中自身——被
+`overflow-hidden` 裁掉的区域拿不到，能精确证明"未裁剪"，而不是只比对矩形。
+
+实测数据（1400×900 视口，单行节点）：卡片高 70.5px，弹层高 226px，
+修复前 8 个色点只露出 1 个；修复后 9 个全部可点。节点拖到视口下沿
+（卡片底部 916px > 视口 900px）时 `data-side=top`，弹层翻到上方。
+
+### 已知限制
+
+- **`selectionAddToBoard` 用例偶发失败**（既有问题，与本次无关）：
+  单独跑与完整跑都会间歇性等不到气泡动作条上的「画板」按钮，
+  对该用例做 `git stash` 前后对比同样失败。需要另开 feat 排查。
+- 弹层与锚点是「一次性」关系：色板选完即关，不做持续跟随。若将来出现
+  需要在打开状态下拖动节点的弹层，需把 `onNodeDrag` 也接进重算时机。
