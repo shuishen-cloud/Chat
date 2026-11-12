@@ -1559,5 +1559,53 @@ cases.huePopoverCloses = async (t) => {
   t.ok(await visible(0), "点击外部关闭色板")
 }
 
+/** 节点贴到视口底部时，弹层应向上翻转而不是溢出视口 */
+cases.huePopoverFlipsAtBottom = async (t) => {
+  await t.seed(seedShortNode())
+  await t.untilVisible(".react-flow__node[data-id='a']")
+
+  // 把节点拖到画布可视区底部
+  const node = t.page.locator(".react-flow__node[data-id='a']")
+  const box = await node.boundingBox()
+  await t.page.mouse.move(box.x + 80, box.y + 10)
+  await t.page.mouse.down()
+  await t.page.mouse.move(box.x + 80, await t.page.evaluate(() => innerHeight - 45), {
+    steps: 15,
+  })
+  await t.page.mouse.up()
+  await t.settle()
+
+  await node.getByTitle("标记颜色").click()
+  await t.page.locator("[data-hue='45']").first().waitFor({ state: "visible" })
+  await t.settle()
+
+  const m = await t.page.evaluate(() => {
+    const lay = document.querySelector("[data-floating-layer]")
+    const r = lay.getBoundingClientRect()
+    const dots = Array.from(
+      document.querySelectorAll("[data-hue], [data-hue-clear]")
+    ).filter((el) => el.closest(".react-flow__node") === null)
+    const allReachable = dots.every((el) => {
+      const b = el.getBoundingClientRect()
+      const at = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2)
+      return !!at && (at === el || el.contains(at))
+    })
+    return {
+      side: lay.dataset.side,
+      top: r.top,
+      bottom: r.bottom,
+      vh: innerHeight,
+      allReachable,
+      n: dots.length,
+    }
+  })
+
+  t.eq(m.n, 9, "9 个色点均已渲染")
+  t.ok(m.top >= 0 && m.bottom <= m.vh, `弹层不溢出视口 (${Math.round(m.top)}~${Math.round(m.bottom)} / ${m.vh})`)
+  t.ok(m.allReachable, "所有色点都可点到")
+  // 底部放不下时应当翻转；若整屏都放不下则不做强要求
+  if (m.vh - 226 > 100) t.eq(m.side, "top", "节点贴底时向上翻转")
+}
+
 runAll(cases)
 console.log("URL:", URL)
