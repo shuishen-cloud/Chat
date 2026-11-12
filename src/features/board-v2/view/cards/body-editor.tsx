@@ -93,7 +93,17 @@ export function BodyEditor({
       className={cn(
         "nodrag cursor-text px-2.5 py-2 text-xs leading-relaxed",
         mono && "font-mono",
-        sized ? "min-h-0 flex-1 overflow-y-auto" : expanded ? "" : "max-h-[440px] overflow-y-auto"
+        /*
+         * 未显式设尺寸时给一个**默认高度上限**，超出就内部滚动。
+         * 之前是 440px——长回答会把卡片撑到近半屏高，几段对话铺开后
+         * 画布被撑得极大。220px 约等于 12 行正文，既能看到开头，
+         * 又不至于让单张卡片主导整个画布；想看全文点「展开」即可。
+         */
+        sized
+          ? "min-h-0 flex-1 overflow-y-auto"
+          : expanded
+            ? "max-h-[440px] overflow-y-auto"
+            : "max-h-[220px] overflow-y-auto"
       )}
     >
       {renderReadonly(value)}

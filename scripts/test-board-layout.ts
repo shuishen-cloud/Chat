@@ -319,3 +319,39 @@ test("placeChat：整段对话避开画布上已有卡片", () => {
 test("placeChat：空输入返回空数组", () => {
   assert.deepEqual(placeChat({ items: [] }), [])
 })
+
+/* ---------------- 视口中心落点 ---------------- */
+
+test("placeCard near：空画布直接落在指定点", () => {
+  const p = placeCard({ cards: [], size: SIZE, near: { x: 400, y: 300 } })
+  assert.deepEqual(p, { x: 0, y: 0 }, "空画布没有参照，回落到原点")
+})
+
+test("placeCard near：就近落位，不压已有卡片", () => {
+  const existing: Rect[] = [{ x: 0, y: 0, ...SIZE }]
+  const p = placeCard({ cards: existing, size: SIZE, near: { x: 0, y: 0 } })
+  assertNoOverlap(p, existing, "就近落位")
+  // 应当贴着已有卡片，而不是跳到很远
+  const dist = Math.hypot(p.x - 0, p.y - 0)
+  assert.ok(dist < SIZE.width * 3, `应就近，实际距离 ${dist}`)
+})
+
+test("placeCard near：near 处空着就直接用 near", () => {
+  const existing: Rect[] = [{ x: 0, y: 0, ...SIZE }]
+  const near = { x: 1000, y: 800 }
+  const p = placeCard({ cards: existing, size: SIZE, near })
+  assert.deepEqual(p, near, "near 没人占时原样使用")
+})
+
+test("placeCard：anchor 优先于 near", () => {
+  const anchor: Rect = { x: 0, y: 0, ...SIZE }
+  const p = placeCard({
+    cards: [anchor],
+    slots: [{ id: "n1", ...anchor }],
+    size: SIZE,
+    anchor: "n1",
+    relation: "branch",
+    near: { x: 2000, y: 2000 },
+  })
+  assert.ok(p.x > anchor.x && p.x < 1000, `应贴 anchor 而非 near，实际 ${JSON.stringify(p)}`)
+})

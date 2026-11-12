@@ -19,12 +19,14 @@ import {
   ReactFlowProvider,
   useEdgesState,
   useNodesState,
+  useReactFlow,
   type Connection,
   type NodeTypes,
 } from "@xyflow/react"
 import "@xyflow/react/dist/style.css"
 
 import { DEFAULT_WIDTH, type BoardCard, type BoardDoc } from "../model/doc"
+import { registerViewportCenter } from "../model/layout"
 import {
   FLOW_NODE_TYPE,
   decorateEdge,
@@ -121,6 +123,9 @@ function InnerCanvas({
     [onInteractionChange]
   )
 
+  /** 画布容器：换算视口中心需要它的尺寸与屏幕位置 */
+  const wrapRef = useRef<HTMLDivElement | null>(null)
+
   /* ---------- React Flow store（唯一真值） ---------- */
 
   /** 单条边的显示状态 */
@@ -170,6 +175,34 @@ function InnerCanvas({
   useEffect(() => {
     setEdges(doc.edges.map((e) => decorateEdge(toFlowEdge(e), edgeVisual(e.id), e)))
   }, [doc, edgeVisual, setEdges])
+
+  /* ---------- 首次挂载：视口对准指定位置 ---------- */
+
+  /**
+   * 注册「视口中心 → 流坐标」换算器。
+   *
+   * store 的新建动作（新建便签、加入卡片）用它决定落点：
+   * 让新内容出现在用户此刻正看着的画布中央。
+   *
+   * 用 getViewport 而非屏幕坐标：平移/缩放后视口会变，
+   * 换算必须每次现算，不能缓存。
+   */
+  const { getViewport } = useReactFlow()
+  useEffect(() => {
+    return registerViewportCenter(() => {
+      const box = wrapRef.current?.getBoundingClientRect()
+      if (!box) return null
+      const vp = getViewport()
+      /*
+       * 屏幕坐标 = 容器左上 + 视口偏移 + 流坐标 × zoom
+       * 反解出「容器中心对应的流坐标」。
+       */
+      return {
+        x: (box.width / 2 - vp.x) / vp.zoom,
+        y: (box.height / 2 - vp.y) / vp.zoom,
+      }
+    })
+  }, [getViewport])
 
   /* ---------- 变更 → 领域文档 ---------- */
 
@@ -323,6 +356,7 @@ function InnerCanvas({
 
   return (
     <div
+      ref={wrapRef}
       className="relative h-full w-full"
       data-interaction={interaction.type}
       onPointerUp={handlePointerUp}

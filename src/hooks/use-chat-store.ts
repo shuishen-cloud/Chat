@@ -4,6 +4,7 @@ import { streamChat } from "@/lib/deepseek"
 import { loadState, nextTitle, saveState, withBoardGc } from "@/lib/storage"
 import {
   LAYOUT_GAP,
+  currentViewportCenter,
   findBranchParent,
   findPreviousCard,
   placeCard,
@@ -746,6 +747,8 @@ export function useChatStore() {
         messageId?: string
         /** 本批次已排好的新卡片，参与避让 */
         occupied?: Slot[]
+        /** 期望落点（视口中心）；有 anchor 时 anchor 优先 */
+        near?: { x: number; y: number } | null
       }
     ): { x: number; y: number } => {
       const size = { width: BOARD_NODE_W_DEFAULT, height: BOARD_NODE_H_DEFAULT }
@@ -791,6 +794,7 @@ export function useChatStore() {
         size,
         anchor,
         relation,
+        near: anchor ? null : (args.near ?? null),
         gap: LAYOUT_GAP,
       })
     },
@@ -1048,8 +1052,13 @@ export function useChatStore() {
       const siblings = prev.boardNodes.filter(
         (n) => n.boardId === targetBoardId
       )
-      // 便签没有分支关系，直接找一个不与现有卡片重叠的空位
-      const at = planPlacement(siblings, {})
+      /*
+       * 便签落在**视口中心**。
+       *
+       * 之前是按「第几张」算网格，用户点完按钮还得满画布找新卡片。
+       * 现在直接出现在正看着的地方；若那里已有卡片，placeCard 会就近让开。
+       */
+      const at = planPlacement(siblings, { near: currentViewportCenter() })
       const node = createNoteNode(targetBoardId, text, at.x, at.y)
       return {
         ...prev,

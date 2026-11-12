@@ -41,6 +41,13 @@ export type PlaceInput = {
   relation?: "branch" | "chain"
   /** 额外要避开的矩形（同批次已排好的新卡片） */
   occupied?: ReadonlyArray<Rect>
+  /**
+   * 期望落点（通常是视口中心）。
+   *
+   * 有 anchor 时 anchor 优先；否则以 near 为起点就近找空位，
+   * 让新卡片出现在用户正看着的地方，而不是画布角落。
+   */
+  near?: Point | null
   gap?: number
 }
 
@@ -169,6 +176,31 @@ function candidatesDown(anchorBox: Rect, size: Size, gap: number): Point[] {
   return out
 }
 
+/**
+ * 从某点向外螺旋找空位。
+ *
+ * 由近及远一圈圈扩，保证「尽量贴近 near」，同时不重叠。
+ * 步长取卡片尺寸 + 间隙，所以候选点天然落在整齐的格子上。
+ */
+function candidatesNear(near: Point, size: Size, gap: number): Point[] {
+  const stepX = size.width + gap
+  const stepY = size.height + gap
+  const out: Point[] = []
+  const rings = Math.ceil(Math.sqrt(MAX_CANDIDATES))
+
+  for (let ring = 0; ring <= rings; ring++) {
+    for (let dy = -ring; dy <= ring; dy++) {
+      for (let dx = -ring; dx <= ring; dx++) {
+        // 只取本圈边缘，内圈上一轮已经加过
+        if (ring > 0 && Math.abs(dx) !== ring && Math.abs(dy) !== ring) continue
+        out.push({ x: near.x + dx * stepX, y: near.y + dy * stepY })
+        if (out.length >= MAX_CANDIDATES) return out
+      }
+    }
+  }
+  return out
+}
+
 /* ---------------- 对外接口 ---------------- */
 
 /**
@@ -221,11 +253,18 @@ export function placeCard(input: PlaceInput): Point {
     }
   }
 
-  /* 2. 全画布扫描 */
+  /* 2. 以 near（视口中心）为起点就近找空位 */
+  if (input.near) {
+    const near = { x: finite(input.near.x, 0), y: finite(input.near.y, 0) }
+    const hitNear = tryCandidates(candidatesNear(near, size, gap))
+    if (hitNear) return hitNear
+  }
+
+  /* 3. 全画布扫描 */
   const hit = tryCandidates(candidatesScan(occupied, size, gap))
   if (hit) return hit
 
-  /* 3. 兜底：包围盒右侧新开一列，纵向逐行找 */
+  /* 4. 兜底：包围盒右侧新开一列，纵向逐行找 */
   const right = Math.max(...occupied.map((r) => (normRect(r) as Rect).x + (normRect(r) as Rect).width))
   const top = Math.min(...occupied.map((r) => (normRect(r) as Rect).y))
   const stepY = size.height + gap
@@ -393,4 +432,37 @@ export function findPreviousCard(
     if (hit) return hit
   }
   return null
+}
+
+/* ---------------- 视口中心：新建内容落在哪 ---------------- */
+
+/**
+ * 当前画布的「视口中心」换算器。
+ *
+ * 由画布在挂载时注册、卸载时清除。store 的新建动作（便签 / 加入卡片）
+ * 通过它拿到用户**此刻正看着**的位置，把新卡片放过去。
+ *
+ * 为什么不用鼠标位置：新建按钮在画板外面，点击时鼠标必然不在画布上；
+ * 而且平板没有右键，没法「在空白处右键新建」。视口中心是唯一对
+ * 所有输入方式都成立的锚点。
+ */
+type CenterResolver = () => { x: number; y: number } | null
+
+let centerResolver: CenterResolver | null = null
+
+/** 画布挂载时注册 */
+export function registerViewportCenter(fn: CenterResolver): () => void {
+  centerResolver = fn
+  return () => {
+    if (centerResolver === fn) centerResolver = null
+  }
+}
+
+/** 当前视口中心（流坐标）；画布未挂载时返回 null */
+export function currentViewportCenter(): { x: number; y: number } | null {
+  try {
+    return centerResolver?.() ?? null
+  } catch {
+    return null
+  }
 }
