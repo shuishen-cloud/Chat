@@ -23,6 +23,8 @@ import {
   type RtEdge,
   type RtNode,
 } from "../src/features/board-v2/model/map.ts"
+import { LongPressTracker } from "../src/features/board-v2/view/long-press.ts"
+import { edgeHueOf, edgePaletteOf, edgeTextOf } from "../src/features/board-v2/view/edge-meta.ts"
 import {
   canStart,
   dragTargets,
@@ -207,4 +209,134 @@ test("卡片节点结构：note 与 message 都携带 id", () => {
   const n: CardNode = { id: "x", position: { x: 0, y: 0 }, card: { kind: "note", id: "x", note: "hi" } }
   assert.equal(n.card.kind, "note")
   assert.equal(n.card.id, "x")
+})
+
+/* ---------------- 连线长按与可见文本（edge-inline-editor） ---------------- */
+
+test("长按：达到阈值触发一次，锚点是按下点", () => {
+  const calls: Array<{ x: number; y: number }> = []
+  let now = 0
+  let pending: (() => void) | null = null
+  const tracker = new LongPressTracker(
+    { delay: 500, onLongPress: (o) => calls.push(o) },
+    {
+      setTimer: (fn) => {
+        pending = fn
+        return 1
+      },
+      clearTimer: () => {
+        pending = null
+      },
+    }
+  )
+  tracker.down({ x: 12, y: 34 })
+  assert.ok(tracker.isPending, "按下后进入等待")
+  now += 500
+  pending?.()
+  assert.deepEqual(calls, [{ x: 12, y: 34 }], "触发一次并带出按下点")
+  assert.ok(tracker.isFired)
+  tracker.up({ x: 12, y: 34 })
+  assert.equal(calls.length, 1, "触发后抬手不再算点击")
+})
+
+test("长按：位移超容差取消，不触发", () => {
+  const events: string[] = []
+  let pending: (() => void) | null = null
+  const tracker = new LongPressTracker(
+    {
+      tolerance: 6,
+      onLongPress: () => events.push("long"),
+      onPress: () => events.push("press"),
+      onCancel: () => events.push("cancel"),
+    },
+    {
+      setTimer: (fn) => {
+        pending = fn
+        return 1
+      },
+      clearTimer: () => {
+        pending = null
+      },
+    }
+  )
+  tracker.down({ x: 0, y: 0 })
+  tracker.move({ x: 20, y: 0 })
+  assert.deepEqual(events, ["cancel"], "超容差立即取消")
+  assert.equal(pending, null, "定时器被清掉，之后不可能再触发")
+  tracker.up({ x: 20, y: 0 })
+  assert.deepEqual(events, ["cancel"], "取消后抬手不算点击")
+})
+
+test("长按：容差内的抖动不取消", () => {
+  const events: string[] = []
+  const tracker = new LongPressTracker(
+    { tolerance: 6, onLongPress: () => events.push("long"), onCancel: () => events.push("cancel") },
+    { setTimer: () => 1, clearTimer: () => {} }
+  )
+  tracker.down({ x: 10, y: 10 })
+  tracker.move({ x: 12, y: 13 })
+  assert.deepEqual(events, [], "3px 抖动仍在容差内")
+  assert.ok(tracker.isPending)
+})
+
+test("长按：未达阈值抬手 = 普通点击", () => {
+  const events: string[] = []
+  let cleared = false
+  const tracker = new LongPressTracker(
+    { onLongPress: () => events.push("long"), onPress: (p) => events.push(`press:${p.x}`) },
+    {
+      setTimer: () => 7,
+      clearTimer: () => {
+        cleared = true
+      },
+    }
+  )
+  tracker.down({ x: 5, y: 5 })
+  tracker.up({ x: 5, y: 5 })
+  assert.deepEqual(events, ["press:5"], "短按走点击回调")
+  assert.ok(cleared, "定时器已清理")
+})
+
+test("长按：pointercancel / dispose 后彻底静默", () => {
+  const events: string[] = []
+  let pending: (() => void) | null = null
+  const tracker = new LongPressTracker(
+    { onLongPress: () => events.push("long"), onPress: () => events.push("press") },
+    {
+      setTimer: (fn) => {
+        pending = fn
+        return 1
+      },
+      clearTimer: () => {
+        pending = null
+      },
+    }
+  )
+  tracker.down({ x: 0, y: 0 })
+  tracker.dispose()
+  pending?.()
+  tracker.up({ x: 0, y: 0 })
+  assert.deepEqual(events, [], "卸载/取消后既不触发也不当点击")
+})
+
+test("连线文字：label 优先，其次 prompt，都没有返回 undefined", () => {
+  assert.equal(edgeTextOf({ label: "前置", prompt: "总结", kind: "flow" }), "前置")
+  assert.equal(edgeTextOf({ label: "  ", prompt: "总结", kind: "flow" }), "总结", "空白 label 视为未设置")
+  assert.equal(edgeTextOf({ prompt: "总结", kind: "flow" }), "总结")
+  assert.equal(edgeTextOf({ kind: "manual" }), undefined)
+})
+
+test("连线取色：hue 优先，缺失回落 promptHue，都缺失为 undefined", () => {
+  assert.equal(edgeHueOf({ hue: 280, promptHue: 150 }), 280)
+  assert.equal(edgeHueOf({ promptHue: 150 }), 150)
+  assert.equal(edgeHueOf({}), undefined)
+  assert.equal(edgePaletteOf({}, false), null, "无颜色时不产生调色板，交给 CSS 主题色")
+})
+
+test("连线配色：暗色不复用浅色值（防过曝）", () => {
+  const light = edgePaletteOf({ hue: 45 }, false)!
+  const dark = edgePaletteOf({ hue: 45 }, true)!
+  assert.notEqual(light.chipBg, dark.chipBg)
+  assert.notEqual(light.chipFg, dark.chipFg)
+  assert.notEqual(light.stroke, dark.stroke)
 })
