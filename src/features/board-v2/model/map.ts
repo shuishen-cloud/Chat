@@ -6,9 +6,11 @@
  *  - 映射必须是**可逆**的：fromFlow(toFlow(doc)) 与 doc 字段级等价；
  *  - 纯函数：不读全局、不写 ref、不 import React 运行时（仅类型）。
  */
+import type { CSSProperties } from "react"
 import type { Edge, Node } from "@xyflow/react"
 
 import type { BoardDoc, BoardEdgeDoc, CardNode, EdgeKind } from "./doc.ts"
+import { edgePaletteOf, edgeTextOf } from "../view/edge-meta.ts"
 
 /** 卡片组件从 `data` 里读到的东西 */
 export type CardData = {
@@ -47,9 +49,19 @@ export type EdgeVisual = {
   executing: boolean
   /** 处于「点线选入任务」模式 */
   pickMode: boolean
+  /** 正在被编辑（悬浮编辑器打开中） */
+  editing?: boolean
 }
 
 export const FLOW_NODE_TYPE = "card" as const
+
+/**
+ * 连线类型 id。
+ *
+ * 用自定义边而不直接用 default：只有自定义边才能挂 `EdgeLabelRenderer`
+ * 命中块——默认边的 label 是 SVG <text>，命中区域只有文字那么大。
+ */
+export const EDGE_TYPE = "board" as const
 
 /** 领域节点 → React Flow 节点 */
 export function toFlowNode(node: CardNode, extra?: Omit<CardData, "card">): RtNode {
@@ -78,6 +90,7 @@ export function toFlow(doc: BoardDoc, extraFor?: (n: CardNode) => Omit<CardData,
 export function toFlowEdge(edge: BoardEdgeDoc): RtEdge {
   return {
     id: edge.id,
+    type: EDGE_TYPE,
     source: edge.from.nodeId,
     target: edge.to.nodeId,
     sourceHandle: edge.from.handle || undefined,
@@ -90,14 +103,27 @@ export function toFlowEdges(doc: BoardDoc): RtEdge[] {
   return doc.edges.map(toFlowEdge)
 }
 
-/** 把视觉状态叠到 Flow 边上（className 交给 CSS，避免内联样式打架） */
+/**
+ * 把视觉状态叠到 Flow 边上（className 交给 CSS，避免内联样式打架）。
+ *
+ * 文本与颜色的判定走 `edge-meta.ts` 的纯函数，这里只负责拼装：
+ *  - 文本：线条文字（label）优先，其次执行提示词；「即执行」边没填才提示占位；
+ *  - 颜色：`hue` → `promptHue` → 主题色，用内联 CSS 变量注入，
+ *    这样一条线的描边/徽章底/文字色始终同源，不再需要两套取色器。
+ */
 export function decorateEdge(
   edge: RtEdge,
   visual: EdgeVisual,
-  doc: BoardEdgeDoc | undefined
+  doc: BoardEdgeDoc | undefined,
+  dark = false
 ): RtEdge {
   const runnable = doc?.kind === "flow"
   const disabled = runnable && doc?.enabled === false
+  const text = doc ? edgeTextOf(doc) : undefined
+  const palette = doc ? edgePaletteOf(doc, dark) : null
+
+  const label = text ?? (runnable ? "未设置提示词" : undefined)
+
   return {
     ...edge,
     className: [
@@ -106,18 +132,29 @@ export function decorateEdge(
       visual.selected && "board-edge-selected",
       visual.pickMode && "board-edge-selectable",
       visual.executing && "board-edge-executing",
+      palette && "board-edge-tinted",
+      // 编辑中：整条线加粗，提示「这条线正在被编辑」
+      visual.editing && "board-edge-editing",
     ]
       .filter(Boolean)
       .join(" "),
-    label: runnable ? doc?.prompt?.trim() || "未设置提示词" : undefined,
+    label,
     labelClassName: [
       "board-edge-label",
-      runnable && doc?.promptHue === undefined && "board-edge-label-flow",
+      palette && "board-edge-label-tinted",
+      runnable && !palette && "board-edge-label-flow",
       disabled && "board-edge-label-disabled",
       visual.selected && "board-edge-label-selected",
     ]
       .filter(Boolean)
       .join(" "),
+    style: palette
+      ? ({
+          "--board-edge-stroke": palette.stroke,
+          "--board-edge-chip-bg": palette.chipBg,
+          "--board-edge-chip-fg": palette.chipFg,
+        } as CSSProperties)
+      : undefined,
   }
 }
 
@@ -174,6 +211,7 @@ export function fromFlow(nodes: RtNode[], edges: RtEdge[], prev: BoardDoc): Boar
        * 也会让序列化结果多出一堆 null/undefined 键。
        */
       const merged: BoardEdgeDoc = { ...next, kind: old.kind }
+      if (old.label !== undefined) merged.label = old.label
       if (old.prompt !== undefined) merged.prompt = old.prompt
       if (old.enabled !== undefined) merged.enabled = old.enabled
       if (old.hue !== undefined) merged.hue = old.hue

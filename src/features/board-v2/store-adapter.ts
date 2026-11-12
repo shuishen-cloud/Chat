@@ -49,6 +49,7 @@ function edgeOf(edge: StoreEdge): BoardDoc["edges"][number] {
     from: { nodeId: edge.from, handle: edge.sourceHandle ?? "" },
     to: { nodeId: edge.to, handle: edge.targetHandle ?? "" },
     kind: edge.kind as EdgeKind,
+    label: edge.label,
     prompt: edge.prompt,
     enabled: edge.enabled,
     hue: edge.hue,

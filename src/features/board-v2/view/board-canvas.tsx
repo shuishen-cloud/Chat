@@ -14,20 +14,30 @@ import {
   BackgroundVariant,
   ConnectionMode,
   Controls,
+  BaseEdge,
+  EdgeLabelRenderer,
   MiniMap,
   ReactFlow,
   ReactFlowProvider,
   useEdgesState,
   useNodesState,
   useReactFlow,
+  useUpdateNodeInternals,
+  getBezierPath,
   type Connection,
+  type EdgeProps,
+  type EdgeTypes,
   type NodeTypes,
 } from "@xyflow/react"
 import "@xyflow/react/dist/style.css"
 
+import { LongPressTracker } from "./long-press"
+import { useRefreshNodeInternals } from "./use-refresh-node-internals"
+
 import { DEFAULT_WIDTH, type BoardCard, type BoardDoc } from "../model/doc"
 import { registerViewportCenter } from "../model/layout"
 import {
+  EDGE_TYPE,
   FLOW_NODE_TYPE,
   decorateEdge,
   fromFlow,
@@ -37,6 +47,7 @@ import {
   type RtEdge,
   type RtNode,
 } from "../model/map"
+
 import { reduceInteraction, type Interaction, type InteractionEvent } from "../interaction/machine"
 import { MessageCard } from "./cards/message-card"
 import { NoteCard } from "./cards/note-card"
@@ -61,13 +72,28 @@ export type BoardCanvasProps = {
   /** 选边模式：点线加入/移出任务 */
   edgePickMode?: boolean
   onEdgePick?: (edgeId: string) => void
+  /** 正在编辑的边（悬浮编辑器打开中），用于把线高亮成「可编辑」 */
+  editingEdgeId?: string | null
   /** 源消息等外部上下文（按卡片查） */
   sourceOf: (card: BoardCard) => CardData["source"]
   dark: boolean
   actions: CardActions
   /** 文档几何变更（位置/尺寸/删边）统一从这里出去 */
   onDocChange: (next: BoardDoc) => void
+  /**
+   * 长按线：打开编辑器。
+   *
+   * `anchor` 是**屏幕上真实按下点**，不再是边的包围盒中心：
+   * 悬浮窗要贴在手指/鼠标所在处，而不是钉在屏幕中部。
+   */
   onEdgeClick: (edgeId: string, anchor: { x: number; y: number }) => void
+  /**
+   * 短按线：执行这条线。
+   *
+   * 语义分工（用户的心智模型）：**点击 = 干活，长按 = 改这条线**。
+   * 不可执行的线（纯联系/被禁用）点击不做事，只提示。
+   */
+  onEdgeRun?: (edgeId: string) => void
   onConnect: (from: { nodeId: string; handle: string }, to: { nodeId: string; handle: string }) => void
   onInteractionChange?: (state: Interaction) => void
 }
@@ -86,11 +112,13 @@ function InnerCanvas({
   executingEdgeId = null,
   edgePickMode = false,
   onEdgePick,
+  editingEdgeId = null,
   sourceOf,
   dark,
   actions,
   onDocChange,
   onEdgeClick,
+  onEdgeRun,
   onConnect,
   onInteractionChange,
 }: BoardCanvasProps) {
@@ -104,6 +132,17 @@ function InnerCanvas({
   actionsRef.current = actions
 
   /* ---------- 交互状态机 ---------- */
+
+  /** 当前进行中的长按计时器（同一时刻只允许一个） */
+  const trackerRef = useRef<LongPressTracker | null>(null)
+  /**
+   * 上一次手势被命中块处理过的时间戳。
+   *
+   * 命中块的 pointerup 与 React Flow 的 onEdgeClick 是**同一手势的两条路径**：
+   * 前者立刻拿到执行/编辑，后者随后还会再派发一次。没有这道去重，
+   * 点击一次线会发两次请求（实测两个 NodeRun）。
+   */
+  const lastHandledAtRef = useRef(0)
 
   const interactionRef = useRef<Interaction>({ type: "idle" })
   const [interaction, setInteraction] = useState<Interaction>({ type: "idle" })
@@ -134,8 +173,9 @@ function InnerCanvas({
       selected: selectedEdgeIds.includes(id),
       executing: executingEdgeId === id,
       pickMode: edgePickMode,
+      editing: editingEdgeId === id,
     }),
-    [selectedEdgeIds, executingEdgeId, edgePickMode]
+    [selectedEdgeIds, executingEdgeId, edgePickMode, editingEdgeId]
   )
 
   const [nodes, setNodes, onNodesChange] = useNodesState<RtNode>([])
@@ -173,8 +213,9 @@ function InnerCanvas({
    * 且不影响节点几何，合并到一个 effect 里会连带重建节点。
    */
   useEffect(() => {
-    setEdges(doc.edges.map((e) => decorateEdge(toFlowEdge(e), edgeVisual(e.id), e)))
-  }, [doc, edgeVisual, setEdges])
+    setEdges(doc.edges.map((e) => decorateEdge(toFlowEdge(e), edgeVisual(e.id), e, dark)))
+    // dark 进依赖：线的颜色在暗色下要换一套值（颜色是内联变量，不是 CSS class）
+  }, [doc, edgeVisual, setEdges, dark])
 
   /* ---------- 首次挂载：视口对准指定位置 ---------- */
 
@@ -188,6 +229,17 @@ function InnerCanvas({
    * 换算必须每次现算，不能缓存。
    */
   const { getViewport } = useReactFlow()
+
+  /**
+   * 手柄位置刷新。
+   *
+   * 踩过的坑：React Flow 只在节点**首次量测**时记录 handleBounds，
+   * 而我们的卡片高度由内容决定（首帧内容还没排完，高度为 0），
+   * 于是手柄被记到 `y = -10`，连线从节点上方 10px 处画出来——
+   * 表现为「线飘在卡片外面」。节点内容/尺寸变化后必须主动刷新，
+   * 否则边的端点永远是首帧那个错误值。
+   */
+  const updateNodeInternals = useUpdateNodeInternals()
   useEffect(() => {
     return registerViewportCenter(() => {
       const box = wrapRef.current?.getBoundingClientRect()
@@ -295,12 +347,173 @@ function InnerCanvas({
     if (interactionRef.current.type !== "idle") send({ type: "pointerup" })
   }, [send])
 
+  /* ---------- 边的长按编辑 ---------- */
+
+  /**
+   * 线的两种手势，语义严格分开：
+   *
+   *  - **长按** → 打开编辑器（锚点 = 屏幕上真实按下点，悬浮窗贴着手指/鼠标）；
+   *  - **短按** → 执行这条线（不可执行时什么都不做，由上层给提示）。
+   *
+   * 选边模式下两者都退化为「加入/移出任务」——那时用户在挑边，不是在操作边。
+   */
+  const openEdgeEditor = useCallback(
+    (edgeId: string, anchor: { x: number; y: number }) => {
+      if (edgePickMode) {
+        onEdgePick?.(edgeId)
+        return
+      }
+      send({ type: "edge:click", edgeId })
+      onEdgeClick(edgeId, anchor)
+    },
+    [edgePickMode, onEdgePick, send, onEdgeClick]
+  )
+
+  const runEdge = useCallback(
+    (edgeId: string) => {
+      if (edgePickMode) {
+        onEdgePick?.(edgeId)
+        return
+      }
+      onEdgeRun?.(edgeId)
+    },
+    [edgePickMode, onEdgePick, onEdgeRun]
+  )
+
+  /** 浮层要用的实时值：避免把回调塞进 edgeTypes 造成整图重挂 */
+  const editRef = useRef({ openEdgeEditor, runEdge })
+  editRef.current = { openEdgeEditor, runEdge }
+
+  /**
+   * 自定义边：默认贝塞尔曲线 + 一个「标签渲染层」命中块。
+   *
+   * 为什么需要命中块：边路径只有 1.8px 宽，在触屏和密集连线里几乎点不中。
+   * 在线的中点放一个 44×22 的透明块，长按/点击都能稳定命中；
+   * 它同时承担「线条文字」的展示，文字本身也进命中区。
+   */
+  const edgeTypes = useMemo<EdgeTypes>(
+    () => ({
+      board: (props: EdgeProps<RtEdge>) => {
+        const {
+          id,
+          sourceX,
+          sourceY,
+          targetX,
+          targetY,
+          sourcePosition,
+          targetPosition,
+          label,
+          markerEnd,
+          style,
+        } = props
+        const [path, labelX, labelY] = getBezierPath({
+          sourceX,
+          sourceY,
+          sourcePosition,
+          targetX,
+          targetY,
+          targetPosition,
+        })
+
+        /* 同一套手势逻辑挂在两处：整条线的宽交互带（主）+ 中点徽章（文字上也能按） */
+        const gesture = {
+          onContextMenu: (e: React.MouseEvent) => e.preventDefault(),
+          onPointerDown: (e: React.PointerEvent) => {
+            // 只响应主键/触摸，避免右键菜单被当成编辑手势
+            if (e.button !== 0) return
+            e.stopPropagation()
+            const anchor = { x: e.clientX, y: e.clientY }
+            const tracker = new LongPressTracker({
+              onLongPress: () => {
+                // 长按 = 改这条线
+                lastHandledAtRef.current = Date.now()
+                editRef.current.openEdgeEditor(id, anchor)
+              },
+              // 短按 = 跑这条线（编辑要长按，避免手抖误开编辑窗）
+              onPress: () => {
+                lastHandledAtRef.current = Date.now()
+                editRef.current.runEdge(id)
+              },
+            })
+            trackerRef.current?.dispose()
+            trackerRef.current = tracker
+            tracker.down(anchor)
+          },
+          onPointerMove: (e: React.PointerEvent) =>
+            trackerRef.current?.move({ x: e.clientX, y: e.clientY }),
+          onPointerUp: (e: React.PointerEvent) => {
+            trackerRef.current?.up({ x: e.clientX, y: e.clientY })
+            trackerRef.current?.dispose()
+            trackerRef.current = null
+          },
+          onPointerCancel: () => {
+            trackerRef.current?.dispose()
+            trackerRef.current = null
+          },
+        }
+
+        return (
+          <>
+            <BaseEdge
+              id={id}
+              path={path}
+              style={style}
+              markerEnd={markerEnd}
+              /* 关掉框架自带的交互带，下面用更宽的、带手势的版本取代 */
+              interactionWidth={0}
+            />
+            {/*
+             * 整条线的长按/点击热区。
+             *
+             * 之前只在线的中点放了一个 40×20 的小块，用户按在线上其它位置
+             * 完全没有反应——「长按线条没反应」就是这么来的。
+             * 这里沿整条贝塞尔路径铺一条 26px 宽的透明描边，
+             * 线有多长，可长按的范围就有多长。
+             */}
+            <path
+              d={path}
+              fill="none"
+              stroke="transparent"
+              strokeWidth={26}
+              style={{ pointerEvents: "stroke", cursor: "pointer" }}
+              className="board-edge-hit-area nodrag nopan"
+              data-edge-id={id}
+              {...gesture}
+            />
+            <EdgeLabelRenderer>
+              <div
+                className="board-edge-hit nodrag nopan"
+                style={{
+                  position: "absolute",
+                  transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
+                  pointerEvents: label ? "all" : "none",
+                }}
+                data-edge-id={id}
+                title="点击执行 · 长按编辑"
+                {...gesture}
+              >
+                {label ? (
+                  <span className="board-edge-chip" style={{ color: "var(--board-edge-chip-fg, inherit)" }}>
+                    {label}
+                  </span>
+                ) : null}
+              </div>
+            </EdgeLabelRenderer>
+          </>
+        )
+      },
+    }),
+    []
+  )
+
   /* ---------- 卡片渲染 ---------- */
 
   const nodeTypes = useMemo<NodeTypes>(
     () => ({
       [FLOW_NODE_TYPE]: ({ id, data, selected }: { id: string; data: CardData; selected?: boolean }) => {
         const node = docRef.current.nodes.find((n) => n.id === id)
+        // 内容或尺寸变化后手柄位置会过期，这里统一刷新（见 updateNodeInternals 的注释）
+        useRefreshNodeInternals(id, node, updateNodeInternals)
         const sized = node?.width !== undefined && node?.height !== undefined
         const card = data.card
         const act = actionsRef.current
@@ -351,7 +564,8 @@ function InnerCanvas({
         )
       },
     }),
-    [dark, commitGeometry]
+    // updateNodeInternals 是框架稳定引用，但漏写会让 lint 与「刷新失效」同时报错
+    [dark, commitGeometry, updateNodeInternals]
   )
 
   return (
@@ -369,6 +583,8 @@ function InnerCanvas({
         nodes={nodes}
         edges={edges}
         nodeTypes={nodeTypes}
+        edgeTypes={edgeTypes}
+        defaultEdgeOptions={{ type: EDGE_TYPE }}
         onNodesChange={handleNodesChange}
         onEdgesChange={handleEdgesChange}
         onNodeDragStart={handleNodeDragStart}
@@ -377,20 +593,14 @@ function InnerCanvas({
         onConnectEnd={handlePointerUp}
         onConnect={handleConnect}
         onPaneClick={() => send({ type: "pointerup" })}
-        onEdgeClick={(e, edge) => {
-          // 选边模式下点线 = 加入/移出任务，不打开编辑器
-          if (edgePickMode) {
-            onEdgePick?.(edge.id)
-            return
-          }
-          const rect = (e.currentTarget as HTMLElement | null)?.getBoundingClientRect?.()
-          send({ type: "edge:click", edgeId: edge.id })
-          onEdgeClick(
-            edge.id,
-            rect
-              ? { x: rect.left + rect.width / 2, y: rect.top }
-              : { x: window.innerWidth / 2, y: 160 }
-          )
+        /*
+         * 兜底路径：命中块没接住时（键盘聚焦、无障碍、命中块被隐藏）。
+         * 语义必须与命中块一致：点击 = 执行，不是编辑。
+         */
+        onEdgeClick={(_, edge) => {
+          // 同一手势已经被命中块处理过（≤400ms），不再重复执行
+          if (Date.now() - lastHandledAtRef.current < 400) return
+          runEdge(edge.id)
         }}
         connectionMode={ConnectionMode.Loose}
         // 不设 fitView：viewport 归框架，节点增删绝不自动改视图

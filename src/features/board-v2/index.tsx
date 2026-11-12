@@ -33,6 +33,8 @@ export function BoardView({
   executingEdgeId,
   onEdgePick,
   onEdgeClick,
+  onEdgeRun,
+  editingEdgeId,
   onConnectCheck,
   onInteractionChange,
 }: {
@@ -45,9 +47,14 @@ export function BoardView({
   selectedEdgeIds?: string[]
   /** 正在执行的边（"edge:xxx" 里的 xxx） */
   executingEdgeId?: string | null
+  /** 正在编辑的边（悬浮编辑器打开中） */
+  editingEdgeId?: string | null
   onEdgePick?: (edgeId: string) => void
   /** 点线：交给上层打开边编辑器 */
-  onEdgeClick: (edgeId: string) => void
+  /** 长按线：打开编辑器；anchor 是屏幕上真实的按下点 */
+  onEdgeClick: (edgeId: string, anchor: { x: number; y: number }) => void
+  /** 短按线：执行这条线（长按才编辑） */
+  onEdgeRun?: (edgeId: string) => void
   /** 连线前校验（可选，例如禁止自环） */
   onConnectCheck?: (fromId: string, toId: string) => boolean
   onInteractionChange?: (state: Interaction) => void
@@ -151,10 +158,10 @@ export function BoardView({
     [store, onConnectCheck]
   )
 
-  /** 边点击：把锚点交给上层去开编辑器 */
+  /** 边点击：把按下点一起交给上层，悬浮窗才能贴着手指出现 */
   const handleEdgeClick = useCallback(
-    (edgeId: string) => {
-      onEdgeClick(edgeId)
+    (edgeId: string, anchor: { x: number; y: number }) => {
+      onEdgeClick(edgeId, anchor)
     },
     [onEdgeClick]
   )
@@ -170,7 +177,9 @@ export function BoardView({
       executingEdgeId={executingEdgeId}
       onEdgePick={onEdgePick}
       onDocChange={handleDocChange}
-      onEdgeClick={(id) => handleEdgeClick(id)}
+      editingEdgeId={editingEdgeId}
+      onEdgeClick={handleEdgeClick}
+      onEdgeRun={onEdgeRun}
       onConnect={handleConnect}
       onInteractionChange={onInteractionChange}
     />

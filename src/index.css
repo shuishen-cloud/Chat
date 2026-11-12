@@ -331,6 +331,68 @@
     cursor: pointer;
   }
 
+  /*
+   * 着色连线：颜色由 decorateEdge 现算后以 CSS 变量注入，
+   * 描边 / 徽章底 / 徽章文字三者同源——不再需要「线色」与「提示词色」两套。
+   */
+  .board-edge-tinted .react-flow__edge-path {
+    stroke: var(--board-edge-stroke, var(--primary));
+    stroke-width: 1.8;
+  }
+
+  /*
+   * 线的命中块：默认边只有 1.8px 宽，触屏与密集连线下几乎点不中。
+   * 这里在线的中点放一个不可见的 44×22 命中区，长按/点击都能稳定命中。
+   */
+  /* 整条线的长按/点击热区（透明描边，沿路径铺开） */
+  .board-edge-hit-area {
+    /* 只在描边上命中，不占内部空白区域 */
+    pointer-events: stroke;
+  }
+
+  .board-edge-hit {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 20px;
+    min-height: 16px;
+    padding: 3px 0;
+    cursor: pointer;
+    /* 视觉上不占空间，只留命中区 */
+    background: transparent;
+    border-radius: 6px;
+  }
+  .board-edge-hit:hover::before,
+  .board-edge-hit:active::before {
+    content: "";
+    position: absolute;
+    inset: 2px;
+    border-radius: 6px;
+    background: var(--muted);
+    opacity: 0.35;
+    z-index: -1;
+  }
+
+  /* 线的文字徽章（承载 label / 提示词） */
+  .board-edge-chip {
+    max-width: 180px;
+    overflow: hidden;
+    padding: 1px 6px;
+    border-radius: 9999px;
+    font-size: 10px;
+    line-height: 1.5;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    background: var(--board-edge-chip-bg, var(--background));
+    color: var(--board-edge-chip-fg, var(--muted-foreground));
+    outline: 1px solid var(--border);
+  }
+
+  /* 正在编辑的边：整条线加粗，提示「这条线已被选中编辑」 */
+  .board-edge-editing .react-flow__edge-path {
+    stroke-width: 3;
+  }
+
   /* 线上的提示词徽章 */
   .board-edge-label {
     font-size: 10px;
@@ -421,22 +483,40 @@
  * 再配合 `!important` 级别的双类选择器，确保命中区生效。
  */
 
-/* ---- 连线手柄：单一命中区（20×20），视觉圆点由 ::before 绘制 ---- */
+/*
+ * ---- 连线手柄：1×1 的定位点 + ::before 画圆点 + ::after 扩命中区 ----
+ *
+ * 这里踩过一个隐蔽的坑：React Flow 量测手柄时取的是元素**左上角**，
+ * 再用它当连线端点（见 @xyflow/system 的 getHandleBounds / getHandlePosition）。
+ * 只有当手柄元素尺寸趋近 0 时，「左上角」才等于「手柄视觉中心」。
+ *
+ * 曾经把手柄本身做成 20×20 的命中盒，结果每个端点都偏移了半个手柄
+ * （顶部手柄的连线起点是 y=-10），表现为「线画在卡片外面的空白处」，
+ * 而且因为路径退化，点击/长按全都点不中。
+ *
+ * 所以：**手柄元素必须小**，命中区一律交给伪元素去扩。
+ */
 .react-flow__handle.board2-handle {
   /* overlay 容器设为 none 以便不挡卡片交互，手柄自己恢复可点 */
   pointer-events: all;
   /* 必须压过卡片正文区（z-0），否则「看得见点不到」 */
   z-index: 30;
-  width: 20px;
-  height: 20px;
+  /* 1×1：让「左上角 = 中心」，React Flow 量测出的端点才不会偏移 */
+  width: 1px;
+  height: 1px;
+  min-width: 1px;
+  min-height: 1px;
   border: none;
   background: transparent;
-  display: grid;
-  place-items: center;
 }
 
+/* 视觉圆点：绝对定位于 1×1 定位点中心 */
 .react-flow__handle.board2-handle::before {
   content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
   width: 7px;
   height: 7px;
   border-radius: 9999px;
@@ -446,19 +526,31 @@
   transition: opacity 0.15s, transform 0.15s, background-color 0.15s;
 }
 
+/* 命中区：22×22 的透明热区，不参与量测（伪元素不返回 getBoundingClientRect） */
+.react-flow__handle.board2-handle::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 22px;
+  height: 22px;
+  border-radius: 9999px;
+}
+
 .react-flow__handle.board2-handle-source::before {
   background: var(--primary);
 }
 
 .react-flow__node:hover .react-flow__handle.board2-handle::before {
   opacity: 1;
-  transform: scale(1.15);
+  transform: translate(-50%, -50%) scale(1.15);
 }
 
 /* 拉线中：所有落点放大高亮，明确「可以连到这里」 */
 [data-interaction="connecting"] .react-flow__handle.board2-handle::before {
   opacity: 1;
-  transform: scale(1.3);
+  transform: translate(-50%, -50%) scale(1.3);
   box-shadow: 0 0 0 3px color-mix(in oklab, var(--primary) 25%, transparent);
 }
 

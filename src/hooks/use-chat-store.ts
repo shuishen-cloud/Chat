@@ -1194,6 +1194,46 @@ export function useChatStore() {
     }))
   }, [setState])
 
+  /**
+   * 写回线条文字（画在线上）。
+   *
+   * 空串视为「清空」，落库时删掉该字段而不是存 `label: ""`：
+   * 序列化后少一堆空键，往返比较也更干净。
+   */
+  const setEdgeLabel = useCallback((edgeId: string, label: string) => {
+    const text = label.trim()
+    setState((prev) => ({
+      ...prev,
+      boardEdges: prev.boardEdges.map((e) => {
+        if (e.id !== edgeId) return e
+        if (!text) {
+          const { label: _drop, ...rest } = e
+          return rest
+        }
+        return { ...e, label: text }
+      }),
+    }))
+  }, [setState])
+
+  /**
+   * 「即执行」开关：一条线是否参与执行，收敛成一个布尔。
+   *
+   * 开 → kind=flow 且 enabled=true（点击线即执行）；
+   * 关 → kind=manual，同时清掉 enabled，避免残留 `enabled: false` 让人疑惑
+   *      「到底是仅联系还是被禁用的可执行线」。
+   */
+  const setEdgeInstant = useCallback((edgeId: string, on: boolean) => {
+    setState((prev) => ({
+      ...prev,
+      boardEdges: prev.boardEdges.map((e) => {
+        if (e.id !== edgeId) return e
+        if (on) return { ...e, kind: "flow", enabled: true }
+        const { enabled: _drop, ...rest } = e
+        return { ...rest, kind: "manual" }
+      }),
+    }))
+  }, [setState])
+
   const toggleEdgeEnabled = useCallback((edgeId: string) => {
     setState((prev) => ({
       ...prev,
@@ -1968,6 +2008,8 @@ export function useChatStore() {
     connectNodes,
     removeEdge,
     updateEdge,
+    setEdgeLabel,
+    setEdgeInstant,
     toggleEdgeKind,
     toggleEdgeEnabled,
     addTask,

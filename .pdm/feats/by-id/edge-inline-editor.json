@@ -1,0 +1,48 @@
+{
+  "slug": "edge-inline-editor",
+  "title": "连线长按悬浮编辑：线条文字 + 线条颜色 + 即执行模式",
+  "kind": "feat",
+  "status": "testing",
+  "doc": "feat/edge-inline-editor.md",
+  "api": [
+    "useLongPress({delay,onLongPress,onPress}): {onPointerDown,onPointerUp,onPointerCancel,onPointerMove} -> void; store.setEdgeLabel(edgeId, label) -> void; store.setEdgeInstant(edgeId, on) -> void"
+  ],
+  "logs": [
+    "长按触发记 console.debug('[board] 长按编辑连线', edgeId)；位移取消不记日志（噪声）"
+  ],
+  "fallbacks": [
+    "长按定时器在指针抬起/移动超阈值/组件卸载时清理；触屏同一条 pointer 路径，contextmenu 被 preventDefault；边被删除时编辑器自动关闭（找不到 edge 返回 null）"
+  ],
+  "design_note": "点线打开编辑器目前有三处硬伤：①画布把 click 锚点交给上层后，panel 用『prev 为零则退回屏幕中部』的兜底，第二次点线起悬浮窗永远钉在中部；②编辑器只有『保存』才写回提示词，『改为可执行/仅联系』这个按钮本身就是切换执行模式，但语义藏在 kind 里，用户看不出这条线是否参与执行；③线的颜色只作用于线，提示词徽章需另设颜色，两套颜色概念冗余。改为：长按（500ms，位移<6px 取消）线→悬浮窗定位到按下点；窗内给出『线条文字』（边 label，画在线上）与『执行提示词』（prompt）两个独立输入；『即执行』= 整条边的一个开关（kind 在 flow/manual 间切换 + enabled），点击线即执行；颜色统一为一个 HuePicker，promptHue 从 UI 下线（数据保留兼容）。",
+  "impl_note": "新增 view/use-long-press.ts（纯计时器，位移取消）；board-canvas 的边加 EdgeLabelRenderer 命中层，长按触发 onEdgeLongPress(edgeId, 屏幕锚点)，短按仍 → edge:click 打开编辑器（锚点同样用真实按下点）；EdgeEditor 改为受控：线条文字/执行提示词/线色/即执行开关，『改为仅联系』与『禁用』合并为一个『即执行』开关；store 新增 setEdgeLabel 与 setEdgeInstant。颜色渲染：decorateEdge 按 hue 生成 stroke 与徽章底色（hueStroke/hueBg），CSS 变量 --board-edge-hue。",
+  "data_model": [
+    "BoardEdge.label:string?（线条文字，画在线上）; BoardEdge.prompt:string?（执行提示词）; BoardEdge.kind:'manual'|'flow'; BoardEdge.enabled:boolean?; BoardEdge.hue:number?（线色，同时派生徽章底色）; promptHue 保留但 UI 不再写"
+  ],
+  "samples": [
+    "{\"edge\":{\"id\":\"e1\",\"kind\":\"manual\",\"label\":\"前置\",\"hue\":280},\"afterToggleInstant\":{\"kind\":\"flow\",\"enabled\":true,\"instantRun\":true}}"
+  ],
+  "changes": [
+    "src/features/board-v2/view/use-long-press.ts::useLongPress —— 新增：500ms 长按，位移>6px 取消",
+    "src/features/board-v2/view/board-canvas.tsx::EdgeLabelRenderer 命中层 —— 新增：线上长按/短按触发",
+    "src/components/board/edge-editor.tsx —— 重写：线条文字 + 执行提示词 + 线色 + 即执行开关",
+    "src/hooks/use-chat-store.ts::setEdgeLabel —— 新增：写回线条文字",
+    "src/hooks/use-chat-store.ts::setEdgeInstant —— 新增：即执行开关（kind + enabled）"
+  ],
+  "test_note": "node --test scripts/test-board-v2.ts 覆盖 useLongPress 的判定纯函数（超时触发/位移取消/抬起取消）与 decorateEdge 的 hue/promptHue 回退；scripts/test-board.cjs 新增 UI 用例：长按线出现悬浮窗且定位在按下点附近、窗内可写线条文字并持久化、切换即执行后点击线直接执行",
+  "debug_note": "",
+  "extend_note": "",
+  "impact": "仅影响连线编辑入口与线的颜色渲染；短按打开编辑器的行为保留（回归测试 runSingleEdge/runEdgeKeyboard 仍走点击路径）；promptHue 字段保留不写，旧数据仍可渲染",
+  "importance": "high",
+  "commits": [
+    "853b04311a12e3abbe8c2b9562f49919d430557b",
+    "3a7814d7383283e115650eb658f78e952cf454af"
+  ],
+  "notes": [],
+  "discovered": [],
+  "stage": "test",
+  "reviews": {},
+  "comments": {},
+  "stage_reviews": {},
+  "created_at": "2026-11-12T13:42:58.207036+00:00",
+  "updated_at": "2026-11-12T13:44:59.755043+00:00"
+}

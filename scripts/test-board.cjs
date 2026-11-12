@@ -835,11 +835,11 @@ cases.flowEdgeDefaults = async (t) => {
 /** 编辑边上的提示词 */
 cases.editEdgePrompt = async (t) => {
   await t.seed(seedFlow())
-  await t.untilVisible(".react-flow__edge")
+  await t.untilVisible(".board-edge-hit")
 
   // 单击边打开编辑器（点 path 而非 g，命中率更高）
-  await t.page.locator(".react-flow__edge-path").first().click({ force: true })
-  const box = t.page.getByPlaceholder("这条线要做什么？")
+  await t.longPressEdge()
+  const box = t.page.getByLabel("执行提示词").or(t.page.getByPlaceholder("这条线要做什么？"))
   await box.waitFor({ state: "visible" })
   await box.fill("提炼成三点")
   await t.page.getByRole("button", { name: "保存" }).click()
@@ -855,32 +855,32 @@ cases.editEdgePrompt = async (t) => {
 /** 禁用后不参与执行 */
 cases.toggleEdgeEnabled = async (t) => {
   await t.seed(seedFlow())
-  await t.untilVisible(".react-flow__edge")
+  await t.untilVisible(".board-edge-hit")
 
-  // 通过边菜单禁用
-  await t.page.locator(".react-flow__edge-path").first().click({ force: true })
-  await t.page.waitForTimeout(200)
-  await t.page.getByRole("button", { name: /禁用此线|启用此线/ }).first().click()
+  // 「即执行」开关收敛了 kind 与 enabled：关掉后这条线变成纯联系
+  await t.longPressEdge()
+  await t.page.getByRole("switch", { name: "即执行" }).click()
 
   const s = await t.stateUntil(
-    (x) => x.boardEdges[0]?.enabled === false,
+    (x) => x.boardEdges[0]?.kind === "manual",
     3000,
-    "边已禁用"
+    "边已改为仅联系"
   )
-  t.eq(s.boardEdges[0].enabled, false, "enabled=false")
+  t.eq(s.boardEdges[0].kind, "manual", "kind=manual")
+  t.eq(s.boardEdges[0].enabled, undefined, "enabled 字段被清掉，不留半禁状态")
 }
 
 /** 创建任务并把边加进任务 */
 cases.taskCreateAndSelectEdges = async (t) => {
   await t.seed(seedFlow())
-  await t.untilVisible(".react-flow__edge")
+  await t.untilVisible(".board-edge-hit")
 
   // 新建任务会自动进入选边模式（按钮此时显示「退出选边」）
   await t.page.getByRole("button", { name: "新建任务" }).click()
   await t.stateUntil((x) => x.boardTasks.length === 1, 3000, "任务已创建")
   await t.page.getByRole("button", { name: "退出选边" }).waitFor({ state: "visible" })
 
-  await t.page.locator(".react-flow__edge-path").first().click({ force: true })
+  await t.longPressEdge()
 
   const s = await t.stateUntil(
     (x) => x.boardTasks[0]?.edgeIds?.length === 1,
@@ -901,7 +901,7 @@ cases.runTaskWritesHistory = async (t) => {
   await t.seed(seed)
 
   await t.mockReply("这是模型输出")
-  await t.untilVisible(".react-flow__edge")
+  await t.untilVisible(".board-edge-hit")
   await t.page.getByRole("button", { name: /运行任务/ }).click()
 
   const s = await t.stateUntil(
@@ -1041,7 +1041,7 @@ cases.colorMarks = async (t) => {
   t.eq(s1.boardNodes.find((n) => n.id === "a").hue, 200, "节点 hue=200")
 
   // 连线：边编辑器里选色
-  await t.page.locator(".react-flow__edge-path").first().click({ force: true })
+  await t.longPressEdge()
   await t.page.locator("[data-hue='280']").first().click()
   await t.page.getByRole("button", { name: "保存" }).click()
 
@@ -1113,10 +1113,10 @@ cases.runSingleEdge = async (t) => {
   await t.seed(seed)
 
   await t.mockReply("单线输出")
-  await t.untilVisible(".react-flow__edge-path")
+  await t.untilVisible(".board-edge-hit")
 
-  await t.page.locator(".react-flow__edge-path").first().click({ force: true })
-  await t.page.getByRole("button", { name: /立即执行/ }).click()
+  // 点击线 = 直接执行（不再需要先打开编辑器）
+  await t.page.locator(".board-edge-hit").first().click({ force: true })
 
   const s = await t.stateUntil(
     (x) => x.boardNodes.find((n) => n.id === "b")?.runs?.length === 1,
@@ -1136,22 +1136,11 @@ cases.runEdgeKeyboard = async (t) => {
   await t.seed(seed)
 
   await t.mockReply("键盘输出")
-  await t.untilVisible(".react-flow__edge-path")
+  await t.untilVisible(".board-edge-hit")
 
-  await t.page.locator(".react-flow__edge-path").first().click({ force: true })
-  // 关闭编辑器，保证焦点不在输入框
-  await t.page.keyboard.press("Escape")
-  await t.page.waitForTimeout(200)
-
-  // 重新选中线（编辑器关掉后仍需保持选中）
-  await t.page.locator(".react-flow__edge-path").first().click({ force: true })
-  await t.page.keyboard.press("Escape")
-  await t.page.locator(".react-flow__edge-path").first().click({ force: true })
-  await t.page.keyboard.press("Escape")
-  await t.page.waitForTimeout(150)
-
-  // 用 Ctrl+Enter 触发（不依赖编辑器内的输入框）
-  await t.page.locator(".react-flow__edge-path").first().click({ force: true })
+  // 长按打开编辑器，在窗内按 Ctrl+Enter 执行（快捷键不依赖输入框焦点）
+  await t.longPressEdge()
+  await t.page.getByLabel("线条文字（显示在这条线上）").waitFor({ state: "visible" })
   await t.page.keyboard.press("Control+Enter")
 
   const s = await t.stateUntil(
@@ -1162,6 +1151,91 @@ cases.runEdgeKeyboard = async (t) => {
   t.ok(
     (s.boardNodes.find((n) => n.id === "b").runs?.length ?? 0) >= 1,
     "键盘执行生效"
+  )
+}
+
+/** 长按线条：悬浮窗出现在按下点附近（不是屏幕中部兜底） */
+cases.edgeLongPressOpensNearPressPoint = async (t) => {
+  await t.seed(seedFlow())
+  await t.untilVisible(".board-edge-hit")
+
+  // 长按线的中点命中块（不动鼠标，压住 700ms 越过 500ms 阈值）
+  const hit = t.page.locator(".board-edge-hit").first()
+  const b = await hit.boundingBox()
+  const px = b.x + b.width / 2
+  const py = b.y + b.height / 2
+  await t.page.mouse.move(px, py)
+  await t.page.mouse.down()
+  await t.page.waitForTimeout(700)
+  await t.page.mouse.up()
+
+  const dialog = t.page.getByRole("dialog", { name: "连线设置" })
+  await dialog.waitFor({ state: "visible" })
+
+  const db = await dialog.boundingBox()
+  // 悬浮窗贴在按下点附近（允许偏移，但绝不该是屏幕中点）
+  t.ok(
+    Math.abs(db.x + 24 - px) < 120 && Math.abs(db.y + 16 - py) < 160,
+    `悬浮窗贴近按下点（press=${Math.round(px)},${Math.round(py)} box=${Math.round(db.x)},${Math.round(db.y)}）`
+  )
+}
+
+/** 线条文字：输入即落库，并显示在线上 */
+cases.edgeLabelPersists = async (t) => {
+  await t.seed(seedFlow())
+  await t.untilVisible(".board-edge-hit")
+
+  await t.longPressEdge()
+  const input = t.page.getByLabel("线条文字（显示在这条线上）")
+  await input.waitFor({ state: "visible" })
+  await input.fill("前置条件")
+
+  const s = await t.stateUntil(
+    (x) => x.boardEdges[0]?.label === "前置条件",
+    3000,
+    "线条文字已保存"
+  )
+  t.eq(s.boardEdges[0].label, "前置条件", "label 持久化")
+
+  // 线上徽章显示该文字
+  await t.page.locator(".board-edge-chip", { hasText: "前置条件" }).first().waitFor({ state: "visible" })
+
+  // 清空后字段被移除，而不是留空串
+  await input.fill("")
+  const s2 = await t.stateUntil(
+    (x) => x.boardEdges[0]?.label === undefined,
+    3000,
+    "线条文字已清空"
+  )
+  t.ok(!("label" in s2.boardEdges[0]), "清空后不保留空 label 字段")
+}
+
+/** 点击即执行：开启后点线直接执行，不再弹编辑器 */
+cases.edgeInstantRunClick = async (t) => {
+  const seed = seedFlow()
+  seed.boardEdges[0].prompt = "即执行提示词"
+  await t.seed(seed)
+
+  await t.mockReply("点击即执行输出")
+  await t.untilVisible(".board-edge-hit")
+
+  // 点击线 = 直接执行（长按才编辑，所以这里不弹编辑器）
+  await t.page.locator(".board-edge-hit").first().click({ force: true })
+
+  const s = await t.stateUntil(
+    (x) => x.boardNodes.find((n) => n.id === "b")?.runs?.length === 1,
+    8000,
+    "点击线触发了执行"
+  )
+  t.eq(
+    s.boardNodes.find((n) => n.id === "b").contentOverride,
+    "点击即执行输出",
+    "结果写回终点"
+  )
+  t.eq(
+    await t.count("[role='dialog'][aria-label='连线设置']"),
+    0,
+    "点击即执行时不弹编辑器"
   )
 }
 
@@ -1315,35 +1389,40 @@ cases.noteEditWritesSameField = async (t) => {
   t.eq(s.boardNodes[0].contentOverride, "我手写的笔记", "正文与产出共用字段")
 }
 
-/** 提示词颜色独立于线条颜色 */
+/**
+ * 颜色只剩一个取色器（edge-inline-editor）。
+ *
+ * 旧实现有「线条颜色」「提示词色」两套，用户要在两个概念间心算；
+ * 现在线、箭头、文字徽章同源，改一次就够，且不再写 promptHue。
+ */
 cases.promptHue = async (t) => {
   await t.seed(seedFlow())
-  await t.untilVisible(".react-flow__edge-path")
+  await t.untilVisible(".board-edge-hit")
 
-  await t.page.locator(".react-flow__edge-path").first().click({ force: true })
-  const box = t.page.getByPlaceholder("这条线要做什么？")
-  await box.waitFor({ state: "visible" })
+  await t.longPressEdge()
+  await t.page.getByLabel("线条文字（显示在这条线上）").waitFor({ state: "visible" })
 
-  // 「提示词色」那一行的色板
-  await t.page.locator("[data-hue='320']").last().click()
+  // 编辑器里只应有一个色板（两行「线条颜色 / 提示词色」已合并）
+  t.eq(await t.page.locator("[role='dialog'] [data-hue]").count(), 8, "只保留一组预设色")
+
+  await t.page.locator("[role='dialog'] [data-hue='320']").first().click()
 
   const s = await t.stateUntil(
-    (x) => x.boardEdges[0]?.promptHue === 320,
+    (x) => x.boardEdges[0]?.hue === 320,
     3000,
-    "提示词色已保存"
+    "线条颜色已保存"
   )
-  t.eq(s.boardEdges[0].promptHue, 320, "promptHue=320")
-  // 线条颜色不应被连带修改
-  t.ok(s.boardEdges[0].hue === undefined, "线条颜色未被改动")
+  t.eq(s.boardEdges[0].hue, 320, "hue=320")
+  t.ok(s.boardEdges[0].promptHue === undefined, "不再写 promptHue")
 }
 
 /** 边编辑器是悬浮窗：不遮挡画布，点其他线能直接切换 */
 cases.edgeEditorIsFloating = async (t) => {
   await t.seed(seedFlow())
-  await t.untilVisible(".react-flow__edge-path")
+  await t.untilVisible(".board-edge-hit")
 
-  await t.page.locator(".react-flow__edge-path").first().click({ force: true })
-  await t.page.getByPlaceholder("这条线要做什么？").waitFor({ state: "visible" })
+  await t.longPressEdge()
+  await t.page.getByLabel("线条文字（显示在这条线上）").waitFor({ state: "visible" })
 
   // 不应存在全屏遮罩（inset-0）
   const fullOverlay = await t.page.locator("div.absolute.inset-0.z-20").count()
@@ -1490,7 +1569,7 @@ cases.edgeExecutingAnimation = async (t) => {
     })
   })
 
-  await t.page.locator(".react-flow__edge-path").first().click({ force: true })
+  await t.longPressEdge()
   await t.page.getByRole("button", { name: /立即执行/ }).click()
 
   const got = await t.until(
@@ -1595,8 +1674,8 @@ cases.boardLazyLoads = async (t) => {
   t.eq(placeholder, 0, "加载完成后不残留占位文案")
 
   // 拆分出去的组件仍可用：连线编辑器
-  await t.page.locator(".react-flow__edge-path").first().click({ force: true })
-  await t.page.getByPlaceholder("这条线要做什么？").waitFor({ state: "visible" })
+  await t.longPressEdge()
+  await t.page.getByLabel("线条文字（显示在这条线上）").waitFor({ state: "visible" })
   t.ok(true, "拆出的 EdgeEditor 仍可打开")
 }
 

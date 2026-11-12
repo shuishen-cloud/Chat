@@ -239,6 +239,23 @@ async function createHarness(browser, context) {
      * 打开画板视图（侧边栏入口）。
      * 侧边栏和画板内部都有「画板」相关文案，因此限定在 aside 内点击。
      */
+    /**
+     * 长按画板上第一条线，打开连线悬浮编辑器。
+     *
+     * 语义：**点击 = 执行，长按 = 编辑**。所以任何「要改这条线」的用例
+     * 都必须走长按，而不是 click。
+     */
+    async longPressEdge(index = 0) {
+      const hit = page.locator(".board-edge-hit").nth(index)
+      await hit.waitFor({ state: "visible" })
+      const b = await hit.boundingBox()
+      await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2)
+      await page.mouse.down()
+      // 超过 500ms 阈值后抬手
+      await page.waitForTimeout(650)
+      await page.mouse.up()
+    },
+
     async openBoard() {
       await page
         .locator("aside")

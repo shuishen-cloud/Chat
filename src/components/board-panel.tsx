@@ -13,6 +13,7 @@ import {
   StickyNote,
   Trash2,
   X,
+  Zap,
 } from "lucide-react"
 import { toast } from "sonner"
 import { BoardView } from "@/features/board-v2"
@@ -29,6 +30,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import type { ChatStore } from "@/hooks/use-chat-store"
+import { isRunnableEdge } from "@/lib/types"
 import { useIsDark } from "@/hooks/use-is-dark"
 import { cn } from "@/lib/utils"
 
@@ -65,8 +67,8 @@ export function BoardPanel({
     removeNodes,
     removeEdge,
     updateEdge,
-    toggleEdgeKind,
-    toggleEdgeEnabled,
+    setEdgeLabel,
+    setEdgeInstant,
     projectTasks,
     activeTask,
     addTask,
@@ -313,8 +315,9 @@ export function BoardPanel({
             移除选中 {selectedCount}
           </Button>
         )}
-        <span className="text-[11px] text-muted-foreground">
-          拖拽卡片移动 · 四边拖出连线 · 点线编辑提示词
+        <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+          <Zap className="size-3" />
+          点击线条执行 · 长按线条编辑
         </span>
       </div>
 
@@ -489,12 +492,22 @@ export function BoardPanel({
             onEdgePick={(edgeId) => {
               if (activeTask) toggleTaskEdge(activeTask.id, edgeId)
             }}
-            onEdgeClick={(edgeId) => {
+            editingEdgeId={editingEdge}
+            /* 长按 = 编辑：锚点用屏幕上真实的按下点，悬浮窗贴着手指/鼠标出现 */
+            onEdgeClick={(edgeId, anchor) => {
+              setEdgeAnchor(anchor)
               setEditingEdge(edgeId)
-              // 锚点由画布的点击位置给出；这里拿不到时退回屏幕中部
-              setEdgeAnchor((prev) =>
-                prev.x === 0 && prev.y === 0 ? { x: window.innerWidth / 2, y: 160 } : prev
-              )
+            }}
+            /* 点击 = 执行：不可执行的线只提示，不弹编辑器 */
+            onEdgeRun={(edgeId) => {
+              const edge = boardEdges.find((e) => e.id === edgeId)
+              if (!edge) return
+              if (!isRunnableEdge(edge)) {
+                toast.info("这条线是「仅联系」，长按它打开设置并开启「即执行」")
+                return
+              }
+              setEditingEdge(null)
+              runEdge(edgeId)
             }}
             onInteractionChange={() => {
               // 交互状态目前只用于光标表现（由画布内部 data-interaction 驱动）
@@ -512,8 +525,8 @@ export function BoardPanel({
               running={runningTaskId === `edge:${edge.id}`}
               onClose={() => setEditingEdge(null)}
               onUpdate={(patch) => updateEdge(edge.id, patch)}
-              onToggleKind={() => toggleEdgeKind(edge.id)}
-              onToggleEnabled={() => toggleEdgeEnabled(edge.id)}
+              onSetLabel={(label) => setEdgeLabel(edge.id, label)}
+              onSetInstant={(on) => setEdgeInstant(edge.id, on)}
               onSetHue={(hue) => setEdgeHue(edge.id, hue)}
               onRun={() => runEdge(edge.id)}
               onDelete={() => {

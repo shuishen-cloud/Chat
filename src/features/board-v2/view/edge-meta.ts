@@ -12,7 +12,9 @@ import { hueBg, hueText, hueStroke } from "../../../lib/hue.ts"
 import type { BoardEdgeDoc } from "../model/doc"
 
 /** 线上要显示的文字：没有可显示内容时返回 undefined */
-export function edgeTextOf(edge: Pick<BoardEdgeDoc, "label" | "prompt" | "kind">): string | undefined {
+export function edgeTextOf(
+  edge: { label?: string; prompt?: string; kind?: BoardEdgeDoc["kind"] }
+): string | undefined {
   const label = edge.label?.trim()
   if (label) return label
   const prompt = edge.prompt?.trim()

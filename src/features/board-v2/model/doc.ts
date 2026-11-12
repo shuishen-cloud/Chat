@@ -72,13 +72,20 @@ export type BoardEdgeDoc = {
   from: EdgeAnchor
   to: EdgeAnchor
   kind: EdgeKind
+  /**
+   * 线条文字：画在线上，任何 kind 都显示。
+   *
+   * 与 prompt 分开的理由：用户常常先给关系起个名字（「前置」「反例」），
+   * 后面才决定这条线是不是要跑模型。两者混用会让「改名字」顺手改掉指令。
+   */
+  label?: string
   /** 该连线携带的提示词；kind=flow 时参与执行 */
   prompt?: string
   /** 是否参与任务执行，undefined 视为 true */
   enabled?: boolean
   /** 线本身的颜色标记 */
   hue?: number
-  /** 提示词徽章的独立颜色 */
+  /** 提示词徽章的独立颜色（旧数据的兼容回退；UI 不再写它） */
   promptHue?: number
 }
 
