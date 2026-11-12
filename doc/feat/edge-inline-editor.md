@@ -125,4 +125,73 @@ UI（`scripts/test-board.cjs`）：
 
 ## 实现与校验结果
 
-（收尾阶段补写）
+### 落地情况
+
+| 设计点 | 实现位置 |
+|---|---|
+| 长按判定（500ms / 6px 容差 / 卸载清理） | `view/long-press.ts::LongPressTracker` |
+| 连线文字与取色的纯判定 | `view/edge-meta.ts::edgeTextOf` / `edgeHueOf` / `edgePaletteOf` |
+| 整条线可长按的热区 | `view/board-canvas.tsx` 自定义边 `board`：26px 透明描边 + 中点徽章 |
+| 悬浮窗（线条文字 / 提示词 / 单取色器 / 即执行开关） | `components/board/edge-editor.tsx` |
+| 写回线条文字 | `use-chat-store.ts::setEdgeLabel`（空串删字段，不留 `label: ""`） |
+| 即执行开关 | `use-chat-store.ts::setEdgeInstant`（on: flow+enabled / off: manual 且清 enabled） |
+| 颜色统一注入 | `model/map.ts::decorateEdge` 写 CSS 变量 `--board-edge-*` |
+| 手势语义落地 | `board-canvas.tsx`：`onEdgeRun`（点击）/ `onEdgeClick`（长按） |
+| 手柄量测偏移修复 | `src/index.css` 的 `.board2-handle` 回到 1×1 + 伪元素命中区 |
+
+### 与设计的偏差
+
+**「点击即执行」从「线级开关 + 画布级偏好」改为「点击就是执行」。**
+设计原写「即执行是每条线的一个开关，开启后点击线直接执行」，实现过程中发现
+用户的心智模型更简单：**点击 = 干活、长按 = 改这条线**。于是：
+
+- 线级的「即执行」开关保留，它表达的是「这条线是否参与执行」（kind + enabled）；
+- 画布级 `instantRun` 偏好被**删除**（点击执行已是默认行为，那个开关没有意义了）；
+- 不可执行的线被点击时给一条 toast 提示，引导去长按开设置。
+
+### 三个必须记下来的坑
+
+1. **手柄做成 20×20 命中盒 → 所有连线端点偏移 10px。**
+   React Flow 量测手柄取的是元素**左上角**当端点，只有尺寸趋近 0 时才等于视觉中心。
+   顶部手柄因此算出 `y=-10`，线被画到卡片上方空白处，路径退化后点击/长按全部点不中。
+   修法：手柄元素 1×1，视觉圆点与 22×22 命中区都用伪元素画（伪元素不参与量测）。
+
+2. **长按热区只放在线中点 → 按线的其它位置完全没反应。**
+   第一版把手势挂在 `EdgeLabelRenderer` 的中点徽章上（约 42×23），
+   线有几百像素长，用户在别处按下去事件根本到不了。
+   修法：沿整条贝塞尔路径铺 26px 宽透明描边（`pointer-events: stroke`）。
+
+3. **点击一次线发出两次执行请求。**
+   命中块的 `pointerup` 与 React Flow 的 `onEdgeClick` 是同一手势的两条路径。
+   修法：命中块处理手势后记 `lastHandledAtRef`，兜底路径 400ms 内直接 return。
+
+### 校验
+
+纯函数（`node --test scripts/test-board-v2-model.ts`，20 用例全通过）：
+
+- `longPressFiresAfterDelay` / `longPressCancelledByMove` / `longPressCancelledByUp`
+  / `longPress: dispose 后静默` —— 长按的四种结局；
+- `连线文字：label 优先，其次 prompt` / `取色回退` / `暗色不复用浅色值`。
+
+UI（`scripts/test-board.cjs`，本次新增/改写）：
+
+| 用例 | 验证点 |
+|---|---|
+| `edgeLongPressOpensNearPressPoint` | 长按 → 悬浮窗出现在按下点附近（非屏幕中部兜底） |
+| `edgeLabelPersists` | 线条文字落库并显示在线上；清空后字段被移除 |
+| `edgeInstantRunClick` | 点击线直接执行，且不弹编辑器 |
+| `runSingleEdge` | 改写为「点击即执行」路径 |
+| `toggleEdgeEnabled` | 改写为「即执行」开关（kind 切 manual，enabled 被清） |
+| `promptHue` | 改写为「只剩一个取色器」，且不再写 `promptHue` |
+| `editEdgePrompt` / `colorMarks` / `edgeEditorIsFloating` 等 | 改为经 `longPressEdge()` 打开编辑器 |
+
+手工验证（浏览器脚本，沿路径取 t=0.2/0.35/0.5/0.65/0.8 五点）：
+t=0.35~0.8 长按均弹出编辑器且不触发执行；单击 t=0.65 位置发出 1 个请求、不弹编辑器。
+
+### 已知限制
+
+- `promptHue` 字段保留但 UI 不再写；旧数据仍按「hue → promptHue → 主题色」回退渲染。
+- 触屏长按会触发系统 `contextmenu`，已在命中区 `preventDefault` 吃掉；
+  但部分浏览器仍会在长按末尾闪现选择柄，未做额外处理。
+- 手柄元素 1×1 后，框架自带的 `.react-flow__handle` 默认样式全部靠我们的
+  伪元素覆盖；若将来升级 React Flow 改动手柄量测算法，需回归一次端点位置。
