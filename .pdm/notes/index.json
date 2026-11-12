@@ -1,17 +1,18 @@
 {
-  "count": 12,
+  "count": 15,
   "by_kind": {
-    "difficulty": 4,
-    "pitfall": 5,
+    "difficulty": 5,
+    "pitfall": 7,
     "controlled-exception": 1,
     "bug": 2
   },
   "by_status": {
-    "noted": 12
+    "noted": 15
   },
   "by_issue": {},
   "commits": [
     "0541122a",
+    "2acae31f",
     "34d71c5f",
     "5b162332",
     "6adb4dcf",

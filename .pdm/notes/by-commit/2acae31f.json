@@ -1,0 +1,107 @@
+{
+  "commit": "2acae31f",
+  "notes": [
+    {
+      "commit": "2acae31f",
+      "kind": "pitfall",
+      "title": "手柄「看得见点不到」：overlay 被卡片背景盖住且缺 z-index",
+      "detail": "v2 把连线/缩放手柄放进 CardShell 的 overlay 层，但 overlay 渲染在卡片之前且没有 z-index，卡片自身的 bg-card 把 20px 命中区完全盖住。表现为手柄可见、pointerdown 落在正文区，onConnectStart 永不触发。修法：卡片加 relative z-0，overlay 容器 absolute inset-0 z-10 pointer-events-none，手柄自己 pointer-events:all 并 z-index:30。",
+      "author": "human:unknown",
+      "files": [
+        "src/features/board-v2/view/cards/card-shell.tsx"
+      ],
+      "severity": "high",
+      "status": "noted",
+      "catches": [],
+      "verifications": [
+        {
+          "kind": "manual",
+          "target": "",
+          "command": "",
+          "method": "",
+          "script": "",
+          "expected": "",
+          "note": "选中节点后从右侧手柄拖到另一节点，断言 boardEdges 增加 1；同时用 elementFromPoint 确认中心点命中 data-handleid",
+          "cwd": "",
+          "last_run_at": null,
+          "last_status": "unknown",
+          "last_output": ""
+        }
+      ],
+      "issue_id": null,
+      "resolves": [],
+      "tags": [
+        "view"
+      ],
+      "created_at": "2026-11-12T12:52:10.101159+00:00"
+    },
+    {
+      "commit": "2acae31f",
+      "kind": "pitfall",
+      "title": "CSS 写在 @layer components 里压不过 React Flow 的未分层默认样式",
+      "detail": "手柄样式写进 @layer components 后，被 React Flow 自带的 .react-flow__handle(6px) 覆盖，实测仍是 6×6，命中区极小。根因：未分层（unlayered）样式优先级恒定高于任何 @layer 内规则。修法：把 board2 手柄/缩放样式移出 @layer，并用 .react-flow__handle.board2-handle 双类选择器。",
+      "author": "human:unknown",
+      "files": [
+        "src/index.css"
+      ],
+      "severity": "high",
+      "status": "noted",
+      "catches": [],
+      "verifications": [
+        {
+          "kind": "command",
+          "target": "",
+          "command": "node scripts/test-board-v2-ui.cjs",
+          "method": "断言手柄 boundingBox 为 20×20 且连线可建立",
+          "script": "",
+          "expected": "passed",
+          "note": "",
+          "cwd": "",
+          "last_run_at": null,
+          "last_status": "unknown",
+          "last_output": ""
+        }
+      ],
+      "issue_id": null,
+      "resolves": [],
+      "tags": [
+        "style"
+      ],
+      "created_at": "2026-11-12T12:52:12.309837+00:00"
+    },
+    {
+      "commit": "2acae31f",
+      "kind": "difficulty",
+      "title": "缩放的尺寸与坐标必须同源同帧，NodeResizer 无法插入方向不变量",
+      "detail": "v1 用 NodeResizer：它内部算好 x/y/w/h 直接写 store，我们只能在 onResizeEnd 写本地尺寸，于是「尺寸走本地、坐标走 store」，向左拉时右边缘反而右移。v2 自研 ResizeControls：pointermove 里调用纯函数 resizeNode 得到新盒子，一次性写回 React Flow store 的 position+width+height(+style)，松手再由 commitGeometry 落库。好处是方向规则可单独测试（见 test-board-v2.ts 的八方向表驱动用例）。",
+      "author": "human:unknown",
+      "files": [
+        "src/features/board-v2/view/resize-controls.tsx"
+      ],
+      "severity": "high",
+      "status": "noted",
+      "catches": [],
+      "verifications": [
+        {
+          "kind": "test",
+          "target": "scripts/test-board-v2.ts",
+          "command": "",
+          "method": "node --test 断言 west/north 方向对边恒定",
+          "script": "",
+          "expected": "passed",
+          "note": "",
+          "cwd": "",
+          "last_run_at": null,
+          "last_status": "unknown",
+          "last_output": ""
+        }
+      ],
+      "issue_id": null,
+      "resolves": [],
+      "tags": [
+        "view"
+      ],
+      "created_at": "2026-11-12T12:52:15.151739+00:00"
+    }
+  ]
+}
