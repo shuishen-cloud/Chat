@@ -1007,7 +1007,13 @@ export function useChatStore() {
         })
         if (added.length === 0) return prev
         count = added.length
-        // 同一条对话相邻消息自动连 reference 边，形成骨架
+        /*
+         * 同一条对话相邻消息自动连 reference 边，形成「上一张 → 下一张」的骨架。
+         *
+         * 必须显式指定端点：上一张从**下方**出、下一张从**上方**入。
+         * 不指定时 React Flow 会自己挑最近的两个手柄，结果所有线都挤在
+         * 卡片的同一侧、或者横着穿过去，看不出阅读顺序。
+         */
         const edges = [...prev.boardEdges]
         for (let i = 1; i < added.length; i++) {
           edges.push(
@@ -1015,7 +1021,8 @@ export function useChatStore() {
               targetBoardId,
               added[i - 1].id,
               added[i].id,
-              "reference"
+              "reference",
+              { sourceHandle: "s-bottom", targetHandle: "t-top" }
             )
           )
         }

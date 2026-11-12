@@ -76,6 +76,10 @@ const cases = {
     t.ok(assistant.x > user.x, `回答在提问右侧 (${assistant.x} > ${user.x})`)
     t.ok(assistant.y > user.y, "回答在提问下方（纵向交错）")
 
+    // 连线方向：上一张下方出 → 下一张上方入，阅读顺序从上往下
+    t.eq(s.boardEdges[0].sourceHandle, "s-bottom", "连线从上一张下方出")
+    t.eq(s.boardEdges[0].targetHandle, "t-top", "连线进入下一张上方")
+
     // 再点一次不应新增
     await t.page.getByRole("button", { name: "当前对话全部加入" }).click()
     await t.page.waitForTimeout(300)
