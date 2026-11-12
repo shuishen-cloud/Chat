@@ -1413,5 +1413,151 @@ cases.boardLazyLoads = async (t) => {
   t.ok(true, "拆出的 EdgeEditor 仍可打开")
 }
 
+/* ---------------- 色板弹层不被节点裁剪（hue-popover-portal） ---------------- */
+
+/** 只有一个矮节点的画板：卡片 ~70px，色板纵向 9 项必然高于卡片 */
+function seedShortNode() {
+  const now = Date.now()
+  return {
+    ...defaultSeed(),
+    conversations: [
+      {
+        ...defaultSeed().conversations[0],
+        messages: [
+          {
+            id: "m1",
+            role: "assistant",
+            content: "短内容",
+            createdAt: now,
+          },
+        ],
+      },
+    ],
+    boards: [{ id: "b1", projectId: null, name: "思路板", createdAt: now, updatedAt: now }],
+    boardNodes: [
+      {
+        id: "a",
+        boardId: "b1",
+        kind: "message",
+        ref: { conversationId: "c1", messageId: "m1" },
+        x: 320,
+        y: 200,
+        createdAt: now,
+      },
+    ],
+    boardEdges: [],
+    boardTasks: [],
+    activeTaskId: null,
+    activeBoardId: "b1",
+    mainView: "board",
+  }
+}
+
+/**
+ * 节点高度不足时色板列表必须完整可见。
+ *
+ * 回归点：弹层曾是节点内的 absolute 元素，被卡片的 overflow-hidden 裁掉，
+ * 矮节点上只露出第一个色点。改法是把弹层 portal 到 body 并纵向单列。
+ * 这里用 elementFromPoint 精准判定「该像素真的能点到」——被裁掉的区域拿不到。
+ */
+cases.huePopoverNotClipped = async (t) => {
+  await t.seed(seedShortNode())
+  await t.untilVisible(".react-flow__node[data-id='a']")
+
+  await t.page.locator(".react-flow__node[data-id='a']").getByTitle("标记颜色").click()
+  await t.page.locator("[data-hue='45']").first().waitFor({ state: "visible" })
+  await t.settle()
+
+  const m = await t.page.evaluate(() => {
+    const card = document.querySelector(".react-flow__node[data-id='a']")
+    const dots = Array.from(
+      document.querySelectorAll("[data-hue], [data-hue-clear]")
+    ).filter((el) => el.closest(".react-flow__node") === null)
+    const pop = dots[0]?.parentElement
+    const cr = card.getBoundingClientRect()
+    const pr = pop ? pop.getBoundingClientRect() : null
+    const hit = (el) => {
+      const r = el.getBoundingClientRect()
+      const x = r.left + r.width / 2
+      const y = r.top + r.height / 2
+      const at = document.elementFromPoint(x, y)
+      return {
+        self: !!at && (at === el || el.contains(at)),
+        inViewport:
+          r.top >= 0 && r.left >= 0 && r.bottom <= innerHeight && r.right <= innerWidth,
+        top: r.top,
+        bottom: r.bottom,
+        height: r.height,
+      }
+    }
+    return {
+      dotCount: dots.length,
+      card: { top: cr.top, bottom: cr.bottom, height: cr.height },
+      popRect: pr && { top: pr.top, bottom: pr.bottom, height: pr.height, left: pr.left },
+      hits: dots.map(hit),
+      // 弹层是否真的脱出卡片矩形（下沿或上沿越界）
+      escapesCard: pr ? pr.bottom > cr.bottom + 1 || pr.top < cr.top - 1 : false,
+    }
+  })
+
+  t.eq(m.dotCount, 9, "8 个预设色 + 无颜色，共 9 项")
+  t.ok(m.popRect.height > m.card.height, "弹层高于卡片，本例能暴露裁剪")
+
+  const clipped = m.hits.filter((h) => !h.self)
+  t.eq(
+    clipped.length,
+    0,
+    `全部色点都点得到（被裁的 ${clipped.length} 个: ${JSON.stringify(
+      clipped.map((c) => Math.round(c.top))
+    )}）`
+  )
+  const outside = m.hits.filter((h) => !h.inViewport)
+  t.eq(outside.length, 0, "色点全部落在视口内")
+  t.ok(m.escapesCard, "弹层已脱出卡片边界（portal 生效）")
+
+  // 纵向单列：色点的 x 应基本一致
+  const xs = await t.page.evaluate(() =>
+    Array.from(document.querySelectorAll("[data-hue], [data-hue-clear]"))
+      .filter((el) => el.closest(".react-flow__node") === null)
+      .map((el) => Math.round(el.getBoundingClientRect().left))
+  )
+  t.eq(new Set(xs).size, 1, `色点纵向单列（左边界 ${JSON.stringify(xs)}）`)
+
+  // 选色仍然落库
+  await t.page.locator("[data-hue='200']").first().click()
+  const s = await t.stateUntil(
+    (x) => x.boardNodes.find((n) => n.id === "a")?.hue === 200,
+    3000,
+    "节点颜色已保存"
+  )
+  t.eq(s.boardNodes.find((n) => n.id === "a").hue, 200, "节点 hue=200")
+}
+
+/** 点外部与 Esc 都能关闭弹层，不留残影挡住画布 */
+cases.huePopoverCloses = async (t) => {
+  await t.seed(seedShortNode())
+  await t.untilVisible(".react-flow__node[data-id='a']")
+  const open = () =>
+    t.page
+      .locator(".react-flow__node[data-id='a']")
+      .getByTitle("标记颜色")
+      .click()
+  const visible = (n) =>
+    t.until(async () => (await t.count("[data-hue]")) === n)
+
+  await open()
+  t.ok(await visible(8), "点击后打开色板")
+
+  // Esc 关闭
+  await t.page.keyboard.press("Escape")
+  t.ok(await visible(0), "Esc 关闭色板")
+
+  // 点画布空白关闭
+  await open()
+  t.ok(await visible(8), "再次打开")
+  await t.page.locator(".react-flow__pane").first().click({ position: { x: 40, y: 40 } })
+  t.ok(await visible(0), "点击外部关闭色板")
+}
+
 runAll(cases)
 console.log("URL:", URL)
