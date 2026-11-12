@@ -248,9 +248,6 @@ export const BOARD_NODE_H = 180
 export const BOARD_GAP_X = 60
 export const BOARD_GAP_Y = 40
 
-/** 每行最多摆放的节点数，超出换行 */
-export const BOARD_COLUMNS = 3
-
 export function createBoard(projectId: string | null, name = "新画板"): Board {
   const now = Date.now()
   return { id: uid("board"), projectId, name, createdAt: now, updatedAt: now }
@@ -258,24 +255,25 @@ export function createBoard(projectId: string | null, name = "新画板"): Board
 
 /**
  * 从消息创建引用型节点。
- * 位置由调用方给出：在同一画板里连续添加时按行列网格自动排布，避免叠在一起。
+ *
+ * 坐标由调用方传入，不再按「第几张」取模算网格——
+ * 那个算法与画布上真实的卡片位置无关，删卡后计数回流会把新卡压到旧卡上。
+ * 现在统一由 board-v2 的 `placeCard` 计算，见 doc/feat/board-branch-layout.md。
  */
 export function createBoardNode(
   boardId: string,
   ref: { conversationId: string; messageId: string },
-  index: number,
+  at: { x: number; y: number },
   excerpt?: string
 ): BoardNode {
-  const col = index % BOARD_COLUMNS
-  const row = Math.floor(index / BOARD_COLUMNS)
   return {
     id: uid("node"),
     boardId,
     kind: "message",
     ref,
     excerpt,
-    x: col * (BOARD_NODE_W + BOARD_GAP_X),
-    y: row * (BOARD_NODE_H + BOARD_GAP_Y),
+    x: at.x,
+    y: at.y,
     createdAt: Date.now(),
   }
 }

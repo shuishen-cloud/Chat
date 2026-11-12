@@ -13,7 +13,6 @@ import {
   LAYOUT_GAP,
   findBranchParent,
   overlaps,
-  placeBatch,
   placeCard,
   type Rect,
 } from "../src/features/board-v2/model/layout.ts"
@@ -197,39 +196,22 @@ test("非法输入：NaN / 负尺寸 / 空 size 都返回有限坐标", () => {
   assert.ok(Number.isFinite(p.x) && Number.isFinite(p.y), "坐标必须有限")
 })
 
-/* ---------------- 批量落点 ---------------- */
+/* ---------------- 连续放置：多次调用也不重叠 ---------------- */
 
-test("placeBatch：同批次卡片两两不重叠，且不成同一个点", () => {
+test("连续放三张：彼此不重叠，也不压已有卡片", () => {
   const existing: Rect[] = [{ x: 0, y: 0, ...SIZE }]
-  const points = placeBatch({
-    cards: existing,
-    edges: [],
-    sizes: [SIZE, SIZE, SIZE],
-    ids: ["a", "b", "c"],
-  })
-  assert.equal(points.length, 3)
-  for (let i = 0; i < points.length; i++) {
-    assertNoOverlap(points[i], existing, `批量第 ${i} 张 与已存在`)
-    for (let j = i + 1; j < points.length; j++) {
-      assert.notDeepEqual(points[i], points[j], `批量第 ${i} 与第 ${j} 张重叠`)
-      const a: Rect = { ...points[i], ...SIZE }
-      const b: Rect = { ...points[j], ...SIZE }
-      assert.equal(overlaps(a, b), false, `批量第 ${i} 与第 ${j} 张相交`)
-    }
-  }
-})
+  const placed: Rect[] = [...existing]
+  const points: { x: number; y: number }[] = []
 
-test("placeBatch：指定 chain 时逐张向下成链", () => {
-  const points = placeBatch({
-    cards: [],
-    edges: [],
-    sizes: [SIZE, SIZE],
-    ids: ["a", "b"],
-    mode: "chain",
-  })
-  assert.equal(points[0].x, 0)
-  assert.equal(points[1].x, 0, "链条同列")
-  assert.ok(points[1].y >= SIZE.height, "第二张在第一张下方")
+  for (let i = 0; i < 3; i++) {
+    const p = placeCard({ cards: placed, size: SIZE })
+    assertNoOverlap(p, placed, `第 ${i + 1} 张`)
+    points.push(p)
+    placed.push({ x: p.x, y: p.y, ...SIZE })
+  }
+
+  assert.notDeepEqual(points[0], points[1], "第一、二张不同位置")
+  assert.notDeepEqual(points[1], points[2], "第二、三张不同位置")
 })
 
 /* ---------------- 分支父卡片识别 ---------------- */

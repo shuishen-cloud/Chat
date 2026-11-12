@@ -3,11 +3,13 @@ import { toast } from "sonner"
 import { streamChat } from "@/lib/deepseek"
 import { loadState, nextTitle, saveState, withBoardGc } from "@/lib/storage"
 import {
-  BOARD_COLUMNS,
-  BOARD_GAP_X,
-  BOARD_GAP_Y,
-  BOARD_NODE_H,
-  BOARD_NODE_W,
+  LAYOUT_GAP,
+  findBranchParent,
+  findPreviousCard,
+  placeCard,
+  type Slot,
+} from "@/features/board-v2/model/layout"
+import {
   TAG_HUES,
   createBoard,
   createBoardEdge,
@@ -32,6 +34,15 @@ import {
   type Project,
   type Tag,
 } from "@/lib/types"
+
+/**
+ * 落点计算用的卡片尺寸估算。
+ *
+ * 与 BOARD_NODE_W 一致，但高度不用 lib/types 里的 180——那是旧网格的行距假设，
+ * 卡片自适应时的实际高度通常是 100~140，用 180 会把行距拉得很稀。
+ */
+const BOARD_NODE_W_DEFAULT = 260
+const BOARD_NODE_H_DEFAULT = 140
 
 /** 分支树节点：一个对话及其分支后代 */
 export interface BranchNode {
@@ -718,6 +729,74 @@ export function useChatStore() {
   }, [setState])
 
   /**
+   * 新卡片落点：统一入口。
+   *
+   * 输入「当前画板的卡片」与「这条消息的上下文」，输出一个**不与任何现有卡片
+   * 重叠**的坐标。分支消息优先贴到父卡片右侧，否则接在同对话上一条下方，
+   * 再否则由 placeCard 全画布扫描空位。
+   *
+   * 纯几何计算，不碰 store——写成纯函数才能单测。
+   */
+  const planPlacement = useCallback(
+    (
+      siblings: BoardNode[],
+      args: {
+        conversationId?: string
+        messageId?: string
+        /** 本批次已排好的新卡片，参与避让 */
+        occupied?: Slot[]
+      }
+    ): { x: number; y: number } => {
+      const size = { width: BOARD_NODE_W_DEFAULT, height: BOARD_NODE_H_DEFAULT }
+      const slots: Slot[] = siblings.map((n) => ({
+        id: n.id,
+        x: n.x,
+        y: n.y,
+        width: n.width ?? size.width,
+        height: n.height ?? size.height,
+      }))
+
+      let anchor: string | null = null
+      let relation: "branch" | "chain" | undefined
+      if (args.conversationId && args.messageId) {
+        const refCards = siblings.map((n) => ({ id: n.id, ref: n.ref }))
+        const branch = findBranchParent(
+          args.conversationId,
+          args.messageId,
+          stateRef.current.conversations,
+          refCards
+        )
+        if (branch) {
+          anchor = branch
+          relation = "branch"
+        } else {
+          const prev = findPreviousCard(
+            args.conversationId,
+            args.messageId,
+            stateRef.current.conversations,
+            refCards
+          )
+          if (prev) {
+            anchor = prev
+            relation = "chain"
+          }
+        }
+      }
+
+      return placeCard({
+        cards: slots,
+        slots,
+        occupied: args.occupied ?? [],
+        size,
+        anchor,
+        relation,
+        gap: LAYOUT_GAP,
+      })
+    },
+    []
+  )
+
+  /**
    * 批量把多条消息加入指定画板。
    * 返回实际新增 / 跳过的数量，供 UI 给出准确提示（而不是笼统的「已加入」）。
    */
@@ -737,6 +816,8 @@ export function useChatStore() {
         )
         const siblings = prev.boardNodes.filter((n) => n.boardId === boardId)
         const fresh: BoardNode[] = []
+        // 同批次已排好的卡片要参与避让，否则整批会跳到同一个点上
+        const occupied: Slot[] = []
         for (const messageId of messageIds) {
           const key = `${conversationId}:${messageId}`
           if (exists.has(key)) {
@@ -744,9 +825,16 @@ export function useChatStore() {
             continue
           }
           exists.add(key)
-          fresh.push(
-            createBoardNode(boardId, { conversationId, messageId }, siblings.length + fresh.length)
-          )
+          const at = planPlacement(siblings, { conversationId, messageId, occupied })
+          const node = createBoardNode(boardId, { conversationId, messageId }, at)
+          fresh.push(node)
+          occupied.push({
+            id: node.id,
+            x: at.x,
+            y: at.y,
+            width: node.width ?? BOARD_NODE_W_DEFAULT,
+            height: node.height ?? BOARD_NODE_H_DEFAULT,
+          })
         }
         added = fresh.length
         if (fresh.length === 0) return prev
@@ -761,12 +849,12 @@ export function useChatStore() {
       })
       return { added, skipped }
     },
-    [setState]
+    [setState, planPlacement]
   )
 
   /**
    * 把消息加入画板：已存在则只聚焦（不重复创建）。
-   * 位置按当前画板节点数自动排成网格，避免叠在一起。
+   * 落点由 planPlacement 计算，保证不与已有卡片重叠。
    */
   const addMessageToBoard = useCallback(
     (
@@ -789,10 +877,11 @@ export function useChatStore() {
         const siblings = prev.boardNodes.filter(
           (n) => n.boardId === targetBoardId
         )
+        const at = planPlacement(siblings, { conversationId, messageId })
         const node = createBoardNode(
           targetBoardId,
           { conversationId, messageId },
-          siblings.length,
+          at,
           excerpt
         )
         created = true
@@ -806,7 +895,7 @@ export function useChatStore() {
       })
       return created
     },
-    [setState]
+    [setState, planPlacement]
   )
 
   /**
@@ -844,10 +933,11 @@ export function useChatStore() {
       if (!body) return false
       setState((prev) => {
         const siblings = prev.boardNodes.filter((n) => n.boardId === boardId)
+        const at = planPlacement(siblings, { conversationId, messageId })
         const node = createBoardNode(
           boardId,
           { conversationId, messageId },
-          siblings.length,
+          at,
           body
         )
         created = true
@@ -885,21 +975,33 @@ export function useChatStore() {
             )
             .filter(Boolean) as string[]
         )
-        const base = existing.length
         const added: BoardNode[] = []
+        // 整条链逐张落位：第一张找空位，后续接在前一张下方且同样避让已有卡片
+        const occupied: Slot[] = []
         conv.messages.forEach((m) => {
           const key = `${conversationId}:${m.id}`
           if (seen.has(key)) return
           seen.add(key)
-          // 纵向排列成一条链，右侧留出后续整理空间
-          const node = createBoardNode(targetBoardId, {
-            conversationId,
-            messageId: m.id,
-          }, 0)
-          added.push({
-            ...node,
-            x: 0,
-            y: (base + added.length) * (BOARD_NODE_H + 24),
+          /*
+           * 传入「已有卡片 + 本批已排好的卡片」，让 findPreviousCard 能看到
+           * 刚加入的上一条，从而把同一个对话的消息纵向串起来。
+           * 只用 existing 的话，循环里每条都找不到前驱，各自去扫描空位，
+           * 结果就是并排而不是竖排。
+           */
+          const siblings = [...existing, ...added]
+          const at = planPlacement(siblings, { conversationId, messageId: m.id, occupied })
+          const node = createBoardNode(
+            targetBoardId,
+            { conversationId, messageId: m.id },
+            at
+          )
+          added.push(node)
+          occupied.push({
+            id: node.id,
+            x: at.x,
+            y: at.y,
+            width: BOARD_NODE_W_DEFAULT,
+            height: BOARD_NODE_H_DEFAULT,
           })
         })
         if (added.length === 0) return prev
@@ -938,14 +1040,9 @@ export function useChatStore() {
       const siblings = prev.boardNodes.filter(
         (n) => n.boardId === targetBoardId
       )
-      const col = siblings.length % BOARD_COLUMNS
-      const row = Math.floor(siblings.length / BOARD_COLUMNS)
-      const node = createNoteNode(
-        targetBoardId,
-        text,
-        col * (BOARD_NODE_W + BOARD_GAP_X),
-        row * (BOARD_NODE_H + BOARD_GAP_Y)
-      )
+      // 便签没有分支关系，直接找一个不与现有卡片重叠的空位
+      const at = planPlacement(siblings, {})
+      const node = createNoteNode(targetBoardId, text, at.x, at.y)
       return {
         ...prev,
         boardNodes: [...prev.boardNodes, node],
