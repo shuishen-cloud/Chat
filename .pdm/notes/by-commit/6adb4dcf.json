@@ -1,0 +1,39 @@
+{
+  "commit": "6adb4dcf",
+  "notes": [
+    {
+      "commit": "6adb4dcf",
+      "kind": "difficulty",
+      "title": "只有 Portal 不够：小视口下仍需 flip，否则弹层跑到视口外",
+      "detail": "portal 解决裁剪后出现新问题——节点贴近视口底部时弹层向下展开会溢出视口，同样点不到。所以 FloatingLayer 必须实现 auto-flip：默认向下，下方剩余空间不足则翻到上方，两边都不足取空间更大一侧，并夹在 MARGIN 内。定位前首帧不渲染（visibility:hidden），避免闪一下左上角；重算时机除 resize 还要监听 scroll 与 wheel，因为 React Flow 平移不触发 scroll 事件。",
+      "author": "human:unknown",
+      "files": [
+        "src/components/ui/floating-layer.tsx"
+      ],
+      "severity": "medium",
+      "status": "noted",
+      "catches": [],
+      "verifications": [
+        {
+          "kind": "test",
+          "target": "scripts/test-board.cjs::huePopoverFlipsAtBottom",
+          "command": "",
+          "method": "CASE=huePopoverFlipsAtBottom node scripts/test-board.cjs",
+          "script": "",
+          "expected": "passed",
+          "note": "",
+          "cwd": "",
+          "last_run_at": "2026-11-12T19:48:10.715862+08:00",
+          "last_status": "failed",
+          "last_output": "no tests ran in 0.00s\nERROR: not found: /home/lwy/project/shadcn-chat/scripts/test-board.cjs::huePopoverFlipsAtBottom\n(no match in any of [<Dir scripts>])"
+        }
+      ],
+      "issue_id": null,
+      "resolves": [],
+      "tags": [
+        "board"
+      ],
+      "created_at": "2026-11-12T11:47:59.460046+00:00"
+    }
+  ]
+}

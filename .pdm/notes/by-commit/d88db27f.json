@@ -1,0 +1,39 @@
+{
+  "commit": "d88db27f",
+  "notes": [
+    {
+      "commit": "d88db27f",
+      "kind": "pitfall",
+      "title": "z-index 逃不出 overflow-hidden 裁剪，absolute 弹层必须 portal",
+      "detail": "画板节点卡片是 overflow-hidden 的，节点内 absolute 弹层超出卡片边界就被裁。z-index 只管同层叠上下文内的绘制顺序，对溢出裁剪无效。更不能指望画布 minZoom 缩放：裁剪按布局像素计算，与 transform:scale 无关，缩得再小也不显示。而且卡片设了 width/height 后正文 flex-1 会吃掉全部剩余高度，弹层永远出不去。解法是 createPortal 到 body + getBoundingClientRect 做 fixed 定位。",
+      "author": "human:unknown",
+      "files": [
+        "src/components/ui/floating-layer.tsx"
+      ],
+      "severity": "high",
+      "status": "noted",
+      "catches": [],
+      "verifications": [
+        {
+          "kind": "test",
+          "target": "scripts/test-board.cjs::huePopoverNotClipped",
+          "command": "",
+          "method": "CASE=huePopoverNotClipped node scripts/test-board.cjs",
+          "script": "",
+          "expected": "passed",
+          "note": "",
+          "cwd": "",
+          "last_run_at": "2026-11-12T19:48:11.153255+08:00",
+          "last_status": "failed",
+          "last_output": "no tests ran in 0.00s\nERROR: not found: /home/lwy/project/shadcn-chat/scripts/test-board.cjs::huePopoverNotClipped\n(no match in any of [<Dir scripts>])"
+        }
+      ],
+      "issue_id": null,
+      "resolves": [],
+      "tags": [
+        "board"
+      ],
+      "created_at": "2026-11-12T11:47:56.839623+00:00"
+    }
+  ]
+}

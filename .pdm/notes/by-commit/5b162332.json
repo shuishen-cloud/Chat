@@ -23,9 +23,9 @@
           "expected": "passed",
           "note": "",
           "cwd": "",
-          "last_run_at": null,
-          "last_status": "unknown",
-          "last_output": ""
+          "last_run_at": "2026-11-12T19:48:09.235744+08:00",
+          "last_status": "failed",
+          "last_output": "no tests ran in 0.00s\nERROR: not found: /home/lwy/project/shadcn-chat/scripts/test-board.cjs\n(no match in any of [<Dir scripts>])"
         }
       ],
       "issue_id": null,
@@ -57,9 +57,9 @@
           "expected": "passed",
           "note": "",
           "cwd": "",
-          "last_run_at": null,
-          "last_status": "unknown",
-          "last_output": ""
+          "last_run_at": "2026-11-12T19:48:09.405944+08:00",
+          "last_status": "failed",
+          "last_output": "no tests ran in 0.00s\nERROR: not found: /home/lwy/project/shadcn-chat/scripts/test-board.cjs\n(no match in any of [<Dir scripts>])"
         }
       ],
       "issue_id": null,
@@ -91,9 +91,9 @@
           "expected": "built in",
           "note": "",
           "cwd": "",
-          "last_run_at": null,
-          "last_status": "unknown",
-          "last_output": ""
+          "last_run_at": "2026-11-12T19:48:09.573931+08:00",
+          "last_status": "passed",
+          "last_output": "> shadcn-chat@0.0.0 build\n> tsc -b && vite build\n\nvite v8.3.8 building client environment for production...\ntransforming...\n✓ 2774 modules transformed.\nrendering chunks...\ncomputing gzip size...\ndist/index.html                         0.46 kB │ gzip:   0.30 kB\ndist/assets/board-panel-DLioOiRN.css   15.41 kB │ gzip:   2.56 kB\ndist/assets/index-CWCh_gtq.css         79.40 kB │ gzip:  13.51 kB\ndist/assets/board-panel-D7ooR8zn.js   215.08 kB │ gzip:  68.59 kB\ndist/assets/index-CV9vPo40.js         771.85 kB │ gzip: 239.84 kB\n\n✓ built in 475ms\n[plugin builtin:vite-reporter] \n(!) Some chunks are larger than 500 kB after minification. Consider:\n- Using dynamic import() to code-split the application\n- Use build.rolldownOptions.output.codeSplitting to improve chunking: https://rolldown.rs/reference/OutputOptions.codeSplitting\n- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit."
         }
       ],
       "issue_id": null,

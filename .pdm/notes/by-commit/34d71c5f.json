@@ -23,9 +23,9 @@
           "expected": "0",
           "note": "",
           "cwd": "",
-          "last_run_at": null,
-          "last_status": "unknown",
-          "last_output": ""
+          "last_run_at": "2026-11-12T19:48:08.982060+08:00",
+          "last_status": "passed",
+          "last_output": "…(前部省略)…\nan effect only when synchronizing with an external system.\nsrc/components/chat-main.tsx:704:7: warning react(set-state-in-effect): Calling setState synchronously within an effect can trigger cascading renders help: Effects should synchronize React with external systems. Calling setState synchronously inside an effect starts another render and is usually unnecessary. Derive the value during render, initialize state directly, or update it from the event that caused the change. Use an effect only when synchronizing with an external system.\nsrc/components/chat-main.tsx:802:7: warning react(set-state-in-effect): Calling setState synchronously within an effect can trigger cascading renders help: Effects should synchronize React with external systems. Calling setState synchronously inside an effect starts another render and is usually unnecessary. Derive the value during render, initialize state directly, or update it from the event that caused the change. Use an effect only when synchronizing with an external system.\nsrc/components/chat-main.tsx:808:19: warning react(set-state-in-effect): Calling setState synchronously within an effect can trigger cascading renders help: Effects should synchronize React with external systems. Calling setState synchronously inside an effect starts another render and is usually unnecessary. Derive the value during render, initialize state directly, or update it from the event that caused the change. Use an effect only when synchronizing with an external system.\nsrc/components/favorites-panel.tsx:85:7: warning react(set-state-in-effect): Calling setState synchronously within an effect can trigger cascading renders help: Effects should synchronize React with external systems. Calling setState synchronously inside an effect starts another render and is usually unnecessary. Derive the value during render, initialize state directly, or update it from the event that caused the change. Use an effect only when synchronizing with an external system."
         }
       ],
       "issue_id": null,

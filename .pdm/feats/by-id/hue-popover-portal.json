@@ -1,0 +1,50 @@
+{
+  "slug": "hue-popover-portal",
+  "title": "色板弹层改用 Portal 定位并纵向单列：修复节点高度不足时列表被裁剪",
+  "kind": "feat",
+  "status": "closed",
+  "doc": "feat/hue-popover-portal.md",
+  "api": [
+    "FloatingLayer({ anchor, open, onClose, children, align }) -> ReactNode；HuePicker({ value, onChange, layout })"
+  ],
+  "logs": [
+    "无后端日志；开发模式下若锚点元素已卸载则浮层直接不渲染"
+  ],
+  "fallbacks": [
+    "拿不到锚点 rect 时不渲染浮层（避免定位到 0,0）；Portal 挂载点缺失时回退到锚点父容器内联渲染；点击外部与 Esc 均可关闭，防止浮层残留挡住画布操作"
+  ],
+  "design_note": "色板弹层是 absolute 定位在节点卡片内部，而卡片容器是 overflow-hidden，弹层向下展开时超出卡片的部分被直接裁掉；节点越矮（或设了固定 height 被 flex-1 正文吃掉高度）裁得越狠。react-flow 的 minZoom 缩放只影响视觉，裁剪按布局像素计算，缩到很小也不能幸免。z-index 无法逃出 overflow 裁剪，只能把弹层移到裁剪容器之外的层叠根上。",
+  "impl_note": "抽一个轻量的 FloatingLayer 组件：createPortal 到 document.body，用参照元素的 getBoundingClientRect 做 fixed 定位；打开时按可用空间自动决定向上/向下展开（flip），窗口 resize 与画布视口平移缩放时重算位置。HuePicker 增加 layout=row|column，节点按钮用 column 纵向单列，边编辑器与会话菜单保持 row。点击外部或 Esc 关闭。",
+  "data_model": [
+    "无持久化数据结构变化。HuePickerLayout = 'row' | 'column'；FloatingLayer 内部 state: { top: number, left: number, placement: 'top'|'bottom' }"
+  ],
+  "samples": [
+    "{\"anchor\":{\"top\":540,\"bottom\":556,\"left\":600,\"right\":616},\"viewport\":{\"w\":1400,\"h\":900},\"placement\":\"bottom\",\"left\":488,\"top\":560}"
+  ],
+  "changes": [
+    "src/components/ui/floating-layer.tsx —— 新增 Portal 浮层（auto-flip + resize/scroll 重算）",
+    "src/components/hue-picker.tsx —— 新增 layout 属性，column 时纵向单列",
+    "src/components/board/node-hue-button.tsx —— 改用 FloatingLayer 包裹，纵向单列",
+    "scripts/test-board.cjs —— 新增 huePopoverNotClipped 用例"
+  ],
+  "test_note": "Playwright 用例 huePopoverNotClipped：造一个高度仅约 70px 的节点，点开色板，断言 9 个色点全部可见（每个按钮的 boundingBox 都落在视口内且不被卡片边界裁剪，用 elementFromPoint 命中自身），且弹层矩形不被卡片矩形包含式裁剪；再点一个颜色确认仍能选色落库。",
+  "debug_note": "",
+  "extend_note": "",
+  "impact": "节点颜色入口点击后弹层固定在视口内可见，任何节点高度都能完整显示 8 个预设色 + 无颜色；纵向单列更易点选",
+  "importance": "medium",
+  "commits": [
+    "2337e8be4b1b4b106ed09c61500eb4eed64387aa",
+    "d8e4852a0805e2b6eb5bff60d22a4eafdbb2714c",
+    "d88db27ff872aa004dee8e258efa0f93364432e0",
+    "6adb4dcf9c506e10cc43b94e8f7a30674b7d72d4",
+    "9bc030291a7ebb8680b6e5b3d9609f8dd8d3d46e"
+  ],
+  "notes": [],
+  "discovered": [],
+  "stage": "close",
+  "reviews": {},
+  "comments": {},
+  "stage_reviews": {},
+  "created_at": "2026-11-12T11:39:10.392342+00:00",
+  "updated_at": "2026-11-12T11:48:05.607664+00:00"
+}

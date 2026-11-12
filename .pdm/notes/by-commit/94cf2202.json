@@ -23,9 +23,9 @@
           "expected": "passed",
           "note": "",
           "cwd": "",
-          "last_run_at": null,
-          "last_status": "unknown",
-          "last_output": ""
+          "last_run_at": "2026-11-12T19:48:10.923353+08:00",
+          "last_status": "failed",
+          "last_output": "no tests ran in 0.00s\nERROR: not found: /home/lwy/project/shadcn-chat/scripts/test-board.cjs\n(no match in any of [<Dir scripts>])"
         }
       ],
       "issue_id": null,
