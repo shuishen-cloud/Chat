@@ -11,14 +11,23 @@ import { cn } from "@/lib/utils"
 export function HuePicker({
   value,
   onChange,
+  layout = "row",
   className,
 }: {
   value?: number
   onChange: (hue: number | undefined) => void
+  /** row：横向换行（边编辑器/会话菜单）；column：纵向单列（画板节点） */
+  layout?: "row" | "column"
   className?: string
 }) {
   return (
-    <div className={cn("flex flex-wrap items-center gap-1", className)}>
+    <div
+      className={cn(
+        "flex items-center gap-1",
+        layout === "column" ? "flex-col" : "flex-wrap",
+        className
+      )}
+    >
       {HUE_PRESETS.map((hue) => {
         const active = value === hue
         return (
