@@ -37,7 +37,7 @@
 - **对话操作**：停止生成、重新生成、复制、导出 Markdown
 - **思考开关**：可在设置里关闭思维链展示（不改变服务端行为，详见设置面板说明）
 - **界面**：亮/暗主题、侧边栏折叠、智能贴底滚动、代码块一键复制
-- **自托管字体**：正文用霞鹜文楷、代码用 Fira Code，均放在 `public/fonts/`，不依赖外部 CDN
+- **系统字体**：不加载任何字体文件、不引外部 CDN，正文与代码均使用系统字体栈
 - **本地持久化**：状态存 `localStorage`，无需后端
 
 ## 技术栈
@@ -83,6 +83,62 @@ npm run preview  # 预览构建产物
 npm run lint     # oxlint
 ```
 
+构建产物校验（字体、nginx/docker 配置）：
+
+```bash
+npm run build
+node scripts/test-deploy.cjs
+```
+
+## 部署
+
+项目是纯静态站点，构建后 `dist/` 即可直接托管。生产环境用 Docker + Nginx。
+
+### Docker
+
+```bash
+# 构建镜像（多阶段：node 构建 → nginx 运行）
+docker build -t shadcn-chat:latest .
+
+# 启动
+docker run -d --name shadcn-chat -p 8080:80 --restart unless-stopped shadcn-chat:latest
+```
+
+镜像基于 `nginx:1.27-alpine`，`nginx.conf` 已包含：
+
+| 配置 | 作用 |
+|---|---|
+| `try_files $uri $uri/ /index.html` | SPA 前端路由刷新不 404 |
+| `/assets/` `immutable` 缓存 1 年 | 产物带内容哈希，可强缓存 |
+| `index.html` `no-cache` | 发版后用户能拿到新资源引用 |
+| gzip | 压缩 JS/CSS/SVG |
+| `server_tokens off` + 安全头 | 不暴露版本、防嗅探 |
+
+### 已有 Nginx
+
+不使用 Docker 时，把 `dist/` 上传到服务器，然后参照 `nginx.conf` 配置站点。
+核心只有一条 —— SPA 必须回落到 `index.html`：
+
+```nginx
+location / {
+    try_files $uri $uri/ /index.html;
+}
+```
+
+### 子路径部署
+
+若部署在 `https://host/chat/` 这类子路径下，需在 `vite.config.ts` 设置
+`base: '/chat/'` 后重新构建，否则 `/assets/...` 会指向根路径而 404。
+默认配置为根路径部署（`base: '/'`）。
+
+### 关于 API 代理
+
+应用是**浏览器直连** `api.deepseek.com`，API Key 只存在用户浏览器
+`localStorage`。因此 `nginx.conf` **不代理** API —— 反代意味着 Key 要经过
+服务端，与「无后端、Key 不出浏览器」的设计冲突。
+
+如果目标环境无法直连外网，需要自行加 `proxy_pass`，并接受 Key 经服务端转发的后果。
+
 ## 目录结构
 
 ```
@@ -118,6 +174,8 @@ src/
 ## 说明
 
 - 无后端、无账号体系，数据完全在浏览器本地。
+- 字体使用系统字体栈（苹方 / 微软雅黑 / Noto Sans CJK，逐级回退），
+  不加载任何字体文件；系统缺字时由通用族兜底，不会出现豆腐块。
 - 清空浏览器数据会丢失全部对话与画板，重要内容请用「导出为 Markdown」备份。
 - 直连浏览器请求 DeepSeek API，若遇 CORS 问题需自行配置代理。
 - 画板节点只保存对消息的引用，不复制正文；因此删除对话 / 清空消息后，相关卡片会自动移除。

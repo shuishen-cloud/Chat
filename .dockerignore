@@ -1,0 +1,25 @@
+# 构建上下文瘦身：这些目录/文件进镜像没有意义
+node_modules
+dist
+.git
+.gitignore
+.pdm
+doc
+scripts
+.vscode
+.idea
+
+# 本地环境与产物
+.env
+.env.*
+*.local
+*.log
+npm-debug.log*
+.verify
+playwright-report
+test-results
+
+# 开发期说明文档（运行镜像不需要）
+README.md
+Dockerfile
+.dockerignore

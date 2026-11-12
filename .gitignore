@@ -33,8 +33,3 @@ playwright-report
 test-results
 .verify/
 
-# 字体：仓库只保留实际加载的 woff2，上游源码包（zip）体积巨大且与运行无关
-public/fonts/*.zip
-public/fonts/**/*.ttf
-public/fonts/**/*.otf
-
