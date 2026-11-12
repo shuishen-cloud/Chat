@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from "react"
+import { useMemo, useRef, useState } from "react"
 import {
   ChevronDown,
   Maximize2,
@@ -15,7 +15,8 @@ import {
   X,
 } from "lucide-react"
 import { toast } from "sonner"
-import { BoardCanvas } from "@/components/board-canvas"
+import { BoardView } from "@/features/board-v2"
+import { EdgeEditor } from "@/components/board/edge-editor"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -28,6 +29,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import type { ChatStore } from "@/hooks/use-chat-store"
+import { useIsDark } from "@/hooks/use-is-dark"
 import { cn } from "@/lib/utils"
 
 /**
@@ -60,15 +62,11 @@ export function BoardPanel({
     addMessageToBoardSmart,
     addConversationToBoard,
     addNote,
-    moveNode,
-    updateNode,
     removeNodes,
-    connectNodes,
     removeEdge,
     updateEdge,
     toggleEdgeKind,
     toggleEdgeEnabled,
-    jumpToMessage,
     projectTasks,
     activeTask,
     addTask,
@@ -78,14 +76,15 @@ export function BoardPanel({
     toggleTaskEdge,
     runTask,
     stopTask,
-    applyRun,
-    restoreNodeContent,
     runningTaskId,
     runEdge,
-    setNodeHue,
     setEdgeHue,
   } = store
 
+  const dark = useIsDark()
+  /** 正在编辑的边与其悬浮锚点 */
+  const [editingEdge, setEditingEdge] = useState<string | null>(null)
+  const [edgeAnchor, setEdgeAnchor] = useState({ x: 0, y: 0 })
   const [selected, setSelected] = useState<string[]>([])
   const [renaming, setRenaming] = useState(false)
   const [draftName, setDraftName] = useState("")
@@ -96,18 +95,6 @@ export function BoardPanel({
   const [taskDraft, setTaskDraft] = useState("")
   /** 避免 Enter 提交后 onBlur 再提交一次 */
   const submittedRef = useRef(false)
-
-  /**
-   * 选区回调只在内容真变时更新 state。
-   * 画布层已做过一次截流，这里作为第二道防线，避免新数组引发上层重渲染。
-   */
-  const handleSelectionChange = useCallback((ids: string[]) => {
-    setSelected((prev) =>
-      prev.length === ids.length && prev.every((id, i) => id === ids[i])
-        ? prev
-        : ids
-    )
-  }, [])
 
   const selectedCount = selected.length
 
@@ -490,43 +477,52 @@ export function BoardPanel({
             </p>
           </div>
         ) : (
-          <BoardCanvas
-            entries={boardNodeEntries}
-            edges={boardEdges}
-            edgeSelectMode={edgePickMode}
+          <BoardView
+            store={store}
+            boardId={activeBoard.id}
+            dark={dark}
+            edgePickMode={edgePickMode}
             selectedEdgeIds={activeTask?.edgeIds ?? []}
-            onToggleTaskEdge={(edgeId) => {
+            executingEdgeId={
+              runningTaskId?.startsWith("edge:") ? runningTaskId.slice("edge:".length) : null
+            }
+            onEdgePick={(edgeId) => {
               if (activeTask) toggleTaskEdge(activeTask.id, edgeId)
             }}
-            onUpdateEdge={updateEdge}
-            onToggleEdgeKind={toggleEdgeKind}
-            onToggleEdgeEnabled={toggleEdgeEnabled}
-            onSaveContent={(id, text) => updateNode(id, { contentOverride: text })}
-            onRestoreContent={restoreNodeContent}
-            onApplyRun={applyRun}
-            onSetNodeHue={setNodeHue}
-            onSetEdgeHue={setEdgeHue}
-            onRunEdge={runEdge}
-            runningEdgeId={runningTaskId?.startsWith("edge:") ? runningTaskId : null}
-            onMoveNode={moveNode}
-            onConnect={connectNodes}
-            onRemoveNode={(id) => {
-              removeNodes([id])
-              setSelected((prev) => prev.filter((x) => x !== id))
+            onEdgeClick={(edgeId) => {
+              setEditingEdge(edgeId)
+              // 锚点由画布的点击位置给出；这里拿不到时退回屏幕中部
+              setEdgeAnchor((prev) =>
+                prev.x === 0 && prev.y === 0 ? { x: window.innerWidth / 2, y: 160 } : prev
+              )
             }}
-            onRemoveEdge={removeEdge}
-            onToggleExpand={(id) => {
-              const node = boardNodeEntries.find((e) => e.node.id === id)?.node
-              if (node) updateNode(id, { expanded: !node.expanded })
+            onInteractionChange={() => {
+              // 交互状态目前只用于光标表现（由画布内部 data-interaction 驱动）
             }}
-            onJump={jumpToMessage}
-            // 便签的正文统一写 contentOverride：与执行结果同一字段，
-            // 这样「改完再跑」「跑完再改」都不会出现两套内容互相遮蔽
-            onEditNote={(id, text) => updateNode(id, { contentOverride: text })}
-            onResizeNode={(id, width, height) => updateNode(id, { width, height })}
-            onSelectionChange={handleSelectionChange}
           />
         )}
+
+        {editingEdge && (() => {
+          const edge = boardEdges.find((e) => e.id === editingEdge)
+          if (!edge) return null
+          return (
+            <EdgeEditor
+              edge={edge}
+              anchor={edgeAnchor}
+              running={runningTaskId === `edge:${edge.id}`}
+              onClose={() => setEditingEdge(null)}
+              onUpdate={(patch) => updateEdge(edge.id, patch)}
+              onToggleKind={() => toggleEdgeKind(edge.id)}
+              onToggleEnabled={() => toggleEdgeEnabled(edge.id)}
+              onSetHue={(hue) => setEdgeHue(edge.id, hue)}
+              onRun={() => runEdge(edge.id)}
+              onDelete={() => {
+                removeEdge(edge.id)
+                setEditingEdge(null)
+              }}
+            />
+          )
+        })()}
       </div>
     </main>
   )

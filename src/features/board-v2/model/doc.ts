@@ -11,16 +11,15 @@ export type CardKind = "message" | "note"
 /** 引用型卡片的源 */
 export type CardRef = { conversationId: string; messageId: string }
 
-/** 一次连线执行留下的快照记录（与 v1 同构，便于沿用历史数据形状） */
-export type NodeRun = {
-  id: string
-  edgeId: string
-  prompt: string
-  inputNodeIds: string[]
-  output: string
-  error?: string
-  createdAt: number
-}
+/**
+ * 执行历史记录。
+ *
+ * 直接复用 lib/types 的定义而不是另写一份：历史列表组件（HistoryList）
+ * 与既有执行逻辑都基于它，重复定义必然漂移。
+ */
+import type { NodeRun as LibNodeRun } from "@/lib/types"
+
+export type NodeRun = LibNodeRun
 
 /** 通用卡片字段：两种 kind 共享的用户加工层 */
 type CardBase = {

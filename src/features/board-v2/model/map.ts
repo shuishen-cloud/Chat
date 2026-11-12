@@ -28,7 +28,26 @@ export type CardData = {
 }
 
 export type RtNode = Node<CardData, "card">
-export type RtEdge = Edge<{ kind: EdgeKind }>
+export type RtEdge = Edge<{ kind: EdgeKind }> & {
+  /** 线上的提示词徽章文本（由 decorateEdge 计算，不落库） */
+  label?: string
+  labelClassName?: string
+}
+
+/**
+ * 边的展示状态。
+ *
+ * 全部由外部输入（任务选中的边、正在执行的边、选边模式）推导，
+ * 不存进 doc：这些是 UI 状态，重载后不该保留。
+ */
+export type EdgeVisual = {
+  /** 被选进当前任务 */
+  selected: boolean
+  /** 正在执行 */
+  executing: boolean
+  /** 处于「点线选入任务」模式 */
+  pickMode: boolean
+}
 
 export const FLOW_NODE_TYPE = "card" as const
 
@@ -69,6 +88,37 @@ export function toFlowEdge(edge: BoardEdgeDoc): RtEdge {
 
 export function toFlowEdges(doc: BoardDoc): RtEdge[] {
   return doc.edges.map(toFlowEdge)
+}
+
+/** 把视觉状态叠到 Flow 边上（className 交给 CSS，避免内联样式打架） */
+export function decorateEdge(
+  edge: RtEdge,
+  visual: EdgeVisual,
+  doc: BoardEdgeDoc | undefined
+): RtEdge {
+  const runnable = doc?.kind === "flow"
+  const disabled = runnable && doc?.enabled === false
+  return {
+    ...edge,
+    className: [
+      runnable && "board-edge-flow",
+      disabled && "board-edge-disabled",
+      visual.selected && "board-edge-selected",
+      visual.pickMode && "board-edge-selectable",
+      visual.executing && "board-edge-executing",
+    ]
+      .filter(Boolean)
+      .join(" "),
+    label: runnable ? doc?.prompt?.trim() || "未设置提示词" : undefined,
+    labelClassName: [
+      "board-edge-label",
+      runnable && doc?.promptHue === undefined && "board-edge-label-flow",
+      disabled && "board-edge-label-disabled",
+      visual.selected && "board-edge-label-selected",
+    ]
+      .filter(Boolean)
+      .join(" "),
+  }
 }
 
 /** React Flow 节点 → 领域节点（忽略框架附加字段） */
