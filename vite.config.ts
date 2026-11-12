@@ -7,6 +7,8 @@ const rootDir = import.meta.dirname
 
 // https://vite.dev/config/
 export default defineConfig({
+  // 子路径部署时由构建环境注入（如 /deepchat/）；本地开发/根路径部署默认 "/"
+  base: process.env.APP_BASE || "/",
   plugins: [react(), tailwindcss()],
   /*
    * 固定端口并显式绑 127.0.0.1：
