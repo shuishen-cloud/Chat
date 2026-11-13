@@ -91,3 +91,57 @@ Playwright 注入微信 UA（`MicroMessenger/8.0.42`）与普通 UA，分别在 
 - 安全区是**固定估算值**。不同微信版本浮条高度可能不同，若真机仍被压住，需要按实际 UA 与浮条高度微调 `bottomSafeArea()`。
 - 该方案是「避让」而非「覆盖」：原生 UI 在 WebView 之上，CSS 无法干预。
 - `BUBBLE_W` 为估算值，按钮文案变长时需同步调整。
+
+## 实现与校验结果
+
+### 落地清单
+
+| 位置 | 改动 |
+|---|---|
+| `bottomSafeArea()` | 新增：微信/QQ 96px、iOS 24px、其他 12px |
+| 气泡锚点 `useLayoutEffect` | 选区右边缘 +6 / 下边缘 +6；贴底时翻到上方 |
+| 气泡 className | 去掉 `-translate-x-1/2 -translate-y-full`，改用绝对 `top`/`left` |
+| 展开窗初始位置 | 高度 `min(460, max(MIN_H, vh-safe-24))`；`y = max(vh*0.16, rect.top+12)` |
+| `onHeaderPointerMove` | 拖动上限 `vh - safe - 40` |
+| `onResizeMove` | 缩放上限 `vh - safe - frame.y` |
+
+### 实测对照
+
+| 场景 | 修复前底部余量 | 修复后底部余量 |
+|---|---|---|
+| 微信 UA 1920×900 | — | 209px |
+| 微信 UA 1920×720 | **31px（被浮条压住）** | 96px |
+| 普通桌面 1920×900 | — | 209px |
+
+气泡位置：修复前 `bubble.x=700 < sel.right=817`（居中，盖住选区右侧）；
+修复后 `bubble.x >= sel.right` 恒成立（右下方）。
+
+### 踩到的坑
+
+1. **浏览器原生 UI 在 WebView 之上**
+   微信「AI 帮写」浮条不是 DOM，`z-index`、`position: fixed`、portal 全部无效。
+   唯一可靠对策是避让，而不是覆盖。这一点值得写进任何面向移动端 WebView 的设计准则。
+2. **固定高度 + 紧跟选区，两个设计叠加把窗口推向底部**
+   `h=460` 固定 + `y=clamp(rect.top+12, 8, vh-h-8)` 跟随，在大视口选中靠下文本时
+   `y` 被夹到 `vh-468`，底边贴住视口下缘。两处都要按可用高度自适应。
+
+### 测试有效性验证
+
+把实现 stash 掉（只保留测试）重跑：**5/9 通过**，失败项正是 `bubble.x < sel.right`
+与 `1920x720 底部余量 31px`。恢复实现后 **9/9 通过** —— 说明测试确实守住了这个 bug，
+而非空转。
+
+### 已知限制
+
+- 安全区是固定估算值（96px）。不同微信版本/机型浮条高度可能不同；浮条不改变
+  `visualViewport`，无法自动测量，只能按真机实测微调。
+- `BUBBLE_W = 220` 为估算宽度（实测渲染 178px），按钮文案变长时需同步调整。
+
+### 验证
+
+```bash
+npm run build
+npx vite preview --port 5199 &
+APP_URL=http://127.0.0.1:5199/ node scripts/test-quick-ask-safe-area.cjs   # 9/9
+APP_URL=http://127.0.0.1:5199/ node scripts/test-quick-ask.cjs             # 12/12
+```
