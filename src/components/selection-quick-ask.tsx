@@ -60,6 +60,20 @@ type Phase = "idle" | "asking" | "answered" | "error"
 const MIN_W = 320
 const MIN_H = 220
 
+/**
+ * 视口底部需要避让的高度（px）。
+ *
+ * 微信/QQ 内置浏览器的「AI 帮写」浮条、以及 iOS 的底部工具栏都是
+ * **浏览器原生 UI**，绘制在 WebView 合成层之上 —— 页面里 z-index 再高
+ * 也盖不住，只能让它，不去和它抢位置。
+ */
+function bottomSafeArea(): number {
+  const ua = typeof navigator === "undefined" ? "" : navigator.userAgent
+  if (/MicroMessenger|\bQQ\/|QQBrowser|XWEB\//i.test(ua)) return 96
+  if (/iPad|iPhone|iPod/.test(ua)) return 24
+  return 12
+}
+
 
 /** 限制在视口内 */
 function clamp(v: number, min: number, max: number) {
@@ -109,14 +123,29 @@ export function SelectionQuickAsk({
 
 
 
-  // 计算气泡锚点（固定，不随选区变化）
+  /** 气泡的估算宽度（用于靠右时翻转） */
+  const BUBBLE_W = 220
+
+  // 计算气泡锚点：摆在选区**右下方**
+  //
+  // 为什么不用「居中 + 上方」：微信/QQ 内置浏览器会在视口底部叠一条原生
+  // 「AI 帮写」浮条，任何贴着选区上方偏下的气泡都可能落到它下面；
+  // 贴右下角且不出视口底部安全区，就不与原生 UI 抢位置。
   useLayoutEffect(() => {
     const vw = window.innerWidth
-    setAnchor({
-      top: initialRect.top,
-      left: clamp(initialRect.left + initialRect.width / 2, 80, vw - 80),
-    })
-  }, [initialRect.top, initialRect.left, initialRect.width])
+    const vh = window.innerHeight
+    const right = initialRect.left + initialRect.width
+    const bottom = initialRect.top + initialRect.height
+    // 默认贴选区右下方；右侧放不下则整体左移到视口内
+    const left = clamp(right + 6, 8, Math.max(8, vw - BUBBLE_W - 8))
+    // 选区靠下时翻到选区上方，避免被底部原生浮条/键盘挡住
+    const below = bottom + 6
+    const top =
+      below + 32 > vh - bottomSafeArea()
+        ? Math.max(8, initialRect.top - 32)
+        : below
+    setAnchor({ top, left })
+  }, [initialRect.top, initialRect.left, initialRect.width, initialRect.height])
 
   // 展开时初始化悬浮窗位置（跟随选区，除非用户已手动调整）
   useLayoutEffect(() => {
@@ -124,12 +153,17 @@ export function SelectionQuickAsk({
     if (userAdjusted.current && frame) return
     const vw = window.innerWidth
     const vh = window.innerHeight
+    // 底部让出原生浮条的位置，否则输入框会被压住
+    const safe = bottomSafeArea()
     const w = 420
-    const h = 460
+    const h = Math.min(460, Math.max(MIN_H, vh - safe - 24))
     // 多个窗口依次错开 28px，避免完全重叠
     const offset = (index % 5) * 28
     const x = clamp(initialRect.left + initialRect.width / 2 - w / 2 + offset, 8, vw - w - 8)
-    const y = clamp(initialRect.top + 12 + offset, 8, vh - h - 8)
+    // 贴视口上部 16%（CodeReader 同款）：不紧跟选区，
+    // 否则选区靠下时窗口被挤到底边，正好撞上原生浮条
+    const preferred = Math.max(vh * 0.16, initialRect.top + 12)
+    const y = clamp(preferred, 8, Math.max(8, vh - safe - h))
     setFrame({ x, y, w, h })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, index])
@@ -180,7 +214,8 @@ export function SelectionQuickAsk({
       const vw = window.innerWidth
       const vh = window.innerHeight
       const x = clamp(e.clientX - dragState.current.dx, 0, vw - frame.w)
-      const y = clamp(e.clientY - dragState.current.dy, 0, vh - 40)
+      // 不往原生浮条/底部工具栏下面拖
+      const y = clamp(e.clientY - dragState.current.dy, 0, vh - bottomSafeArea() - 40)
       setFrame({ ...frame, x, y })
       userAdjusted.current = true
     },
@@ -218,7 +253,7 @@ export function SelectionQuickAsk({
       const vw = window.innerWidth
       const vh = window.innerHeight
       const nextW = clamp(w + (e.clientX - sx), MIN_W, vw - frame.x - 8)
-      const nextH = clamp(h + (e.clientY - sy), MIN_H, vh - frame.y - 8)
+      const nextH = clamp(h + (e.clientY - sy), MIN_H, vh - bottomSafeArea() - frame.y)
       setFrame({ ...frame, w: nextW, h: nextH })
       userAdjusted.current = true
     },
@@ -351,8 +386,8 @@ export function SelectionQuickAsk({
         ref={boxRef}
         data-qa="bubble"
         data-qa-msg={ctx.messageId}
-        className="fixed z-50 flex -translate-x-1/2 -translate-y-full items-center gap-0.5 rounded-lg border border-border bg-popover p-0.5 shadow-lg"
-        style={{ top: anchor.top - 6, left: anchor.left }}
+        className="fixed z-50 flex items-center gap-0.5 rounded-lg border border-border bg-popover p-0.5 shadow-lg"
+        style={{ top: anchor.top, left: anchor.left }}
         onMouseDown={(e) => e.preventDefault()}
       >
         <Button
