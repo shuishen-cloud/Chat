@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>四条主要链路 · shadcn-chat 架构文档</title>
+<link rel="stylesheet" href="assets/doc.css">
+</head>
+<body>
+
+<header class="topbar">
+  <a class="brand" href="index.html">shadcn-chat <small>架构文档</small></a>
+  <nav class="topnav">
+    <a href="index.html">总览</a>
+    <a href="modules.html">模块</a>
+    <a href="flows.html" aria-current="page">链路</a>
+    <a href="data.html">数据</a>
+  </nav>
+  <span class="spacer"></span>
+  <div class="search"><input type="search" placeholder="搜索小节（/ 聚焦）" data-search aria-label="搜索小节"></div>
+</header>
+
+<div class="layout">
+
+  <aside class="sidebar">
+    <h2>本页目录</h2>
+    <ul data-toc></ul>
+    <h2>其它页面</h2>
+    <ul>
+      <li><a href="index.html">系统总览</a></li>
+      <li><a href="modules.html">模块详情</a></li>
+      <li><a href="data.html">数据模型与术语</a></li>
+    </ul>
+  </aside>
+
+  <main>
+    <div class="toc-source">
+      <h1>四条主要链路</h1>
+      <p class="lede">
+        系统运行时只有四条值得记住的路径，其余都是它们的变体。
+        每条都标出"谁调谁"和"状态在哪里落下来"。
+      </p>
+
+      <!-- ============================================================ -->
+      <h2 id="send">链路一 · 发一条消息</h2>
+
+      <div class="flow">ChatMain 输入框
+  │ onKeyDown / 发送按钮
+  ▼
+store.send(content)                    ← use-chat-store.ts
+  │
+  ├─1─ 若当前无对话，先 createConversation()
+  │
+  ├─2─ 一次 setState 写入两条消息：
+  │      userMsg（完整内容）
+  │      reply（content=""，streaming=true）  ← 占位，UI 立刻显示光标
+  │
+  ├─3─ 发送中：requestAnimationFrame 节流的 flush()
+  │      把累积的 delta 追加到 streaming 那条上
+  │      每帧最多写一次 state，避免每个 token 触发整树重渲染
+  │
+  ├─4─ streamChat()  ────────────────────────> lib/deepseek.ts
+  │      POST /v1/chat/completions  stream:true
+  │      onDelta     → 正文增量
+  │      onReasoning → 思维链增量
+  │
+  └─5─ 收尾三种结局：
+        · 正常结束 → reply.streaming = false
+        · 抛错      → reply.streaming = false, reply.error = msg（UI 渲染错误卡片）
+        · AbortError → 同正常结束，不报错
+
+store.state 变化 ──> useEffect 防抖 200ms ──> saveState() ──> localStorage</div>
+
+      <h3 id="send-abort">停止与重新生成</h3>
+      <ul>
+        <li><code>stop()</code>：<code>abortRef.current.abort()</code>。fetch 抛
+          <code>AbortError</code>，被识别为"用户主动停止"而非错误。</li>
+        <li><code>regenerate()</code>：删掉末条 assistant 消息，用其之前的完整历史重新走一遍
+          <code>send()</code>。</li>
+        <li><code>branchFrom(messageId)</code>：以 <code>branchedFrom</code> 记录来源，
+          复制到该消息为止的全部历史新建一条对话。</li>
+      </ul>
+
+      <div class="note why">
+        <strong>为什么发消息要一次写入两条：</strong>如果把 user 消息和 assistant 占位分两次
+        <code>setState</code>，中间会有一帧只有用户消息、光标还没出现的状态，视觉上像"没反应"。
+        一次写入让"发送"这个动作在 UI 上是原子的。
+      </div>
+
+      <div class="note warn">
+        <strong>为什么用 rAF 节流而不是每个 delta 都写：</strong>一次长回答可能有上千个 SSE 分片。
+        每个分片都 <code>setState</code> 会让 React 每秒重渲染几十次，
+        后续 Markdown 解析（<code>react-markdown</code>）成为瓶颈。按帧合并后每帧最多一次。
+      </div>
+
+      <!-- ============================================================ -->
+      <h2 id="edge-run">链路二 · 执行画板上的一条线</h2>
+
+      <p>这是画板的核心能力：<b>材料 →（线的提示词）→ 输出</b>。
+        <code>runEdge</code>（单跑）与 <code>runTask</code>（跑一组）共用
+        <code>execEdge()</code> 这一个实现。</p>
+
+      <div class="flow">触发来源（三种）
+  ├── EdgeEditor 的「立即执行」
+  ├── 点击/Enter 一条线          → store.runEdge(edgeId)
+  └── 任务下拉「运行」            → store.runTask(taskId)
+                                      │
+                                      ▼
+                              execEdge(edge, {signal, writtenTargets})
+  │
+  ├─1─ 从最新 state 取 source / target 节点
+  │      不存在 → "failed"（不是异常，只是跳过）
+  │
+  ├─2─ inputText = resolveNodeText(source)
+  │      note → contentOverride → excerpt → 源消息正文
+  │
+  ├─3─ 拼 content：
+  │      有 prompt：【材料】\n…\n\n【要求】\n…
+  │      无 prompt：直接是 inputText
+  │
+  ├─4─ streamChat({ messages: [单条 user] })   ← 每次执行都是无状态单轮
+  │
+  └─5─ 写回 target 节点：
+        contentOverride = result.content
+        runs = [新 NodeRun, ...旧]  上限 50 条
+        同一节点被多条线写 → 用 "\n\n---\n\n" 拼接，保留各自产出
+
+  runTask 额外做的事：
+    · 过滤出 isRunnableEdge(edge) 的边（kind=flow 且 enabled !== false）
+    · for 循环串行，边与边之间<b>不做拓扑串联</b>
+    · 一条失败不影响其他，最后 toast 汇总 "成功 n / 失败 m"</div>
+
+      <div class="note why">
+        <strong>为什么不做事流串联（DAG）：</strong>串起来后会引入"上游失败下游怎么办""环检测"
+        "部分重跑"三大问题，而这些在当前使用场景里价值不高。每条边独立执行、各自写回自己的
+        终点，语义简单且可预测——这也是"只跑一条"和"跑一组"能用同一套代码的原因。
+      </div>
+
+      <div class="note">
+        <strong>NodeRun 快照的价值：</strong>每次执行都记下<b>当时的</b>提示词与输入材料。
+        之后用户改了线的提示词，历史记录仍然显示当时的值，可以对比"同一个输入在两次不同提示词下的产出"。
+        失败的 run 也会记录，<code>output</code> 为空、带 <code>error</code>。
+      </div>
+
+      <h3 id="edge-run-anim">执行中的视觉反馈</h3>
+      <ul>
+        <li><code>runningTaskId</code> / <code>executingEdgeId</code> 记在 store 与
+          <code>BoardPanel</code>，对应边加流动动画（CSS dash 动画）。</li>
+        <li>任务运行期间 <code>stopTask()</code> 可中断：abort 同一个 controller，
+          已完成的边结果保留。</li>
+      </ul>
+
+      <!-- ============================================================ -->
+      <h2 id="persist">链路三 · 状态怎么存下来</h2>
+
+      <div class="flow">任意 store 方法
+  │ 调用 setState(updater)
+  ▼
+setRawState(prev => next)     ← React 的 useState
+  └─ 同一帧内同步更新 stateRef.current   ← 给异步循环读最新值用
+  │
+  ▼
+useEffect([state]) ── setTimeout(200ms) ──> saveState(state)
+                                              │
+                                              ├─ 成功 → JSON.stringify 写入
+                                              │          localStorage["shadcn-chat/state/v1"]
+                                              │
+                                              └─ 失败（配额满）→ console.error + 返回 false
+                                                                  └─ 上层 toast 提示一次</div>
+
+      <h3 id="persist-others">其它独立的存储键</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>键</th><th>内容</th><th>谁写</th></tr></thead>
+          <tbody>
+            <tr><td><code>shadcn-chat/state/v1</code></td><td>整个 <code>ChatState</code></td><td>store 防抖</td></tr>
+            <tr><td><code>shadcn-chat/theme</code></td><td><code>"dark"</code> / <code>"light"</code></td><td><code>App.useTheme</code> 立即写</td></tr>
+            <tr><td><code>shadcn-chat/board-width</code></td><td>画板像素宽度</td><td><code>App</code> 立即写</td></tr>
+            <tr><td><code>shadcn-chat/prompt-history/v2</code></td><td>按对话分组的提问历史</td><td><code>usePromptHistory</code></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="note">
+        <strong>哪些东西不在 <code>ChatState</code> 里：</strong>主题、画板宽度、滚动位置、
+        当前展开的历史项、边编辑器是开着的——都是纯 UI 偏好或会话级瞬态，
+        它们要么独立存键，要么干脆不存。这让 <code>ChatState</code> 保持"业务数据"的纯粹性。
+      </div>
+
+      <h3 id="persist-load">读取时的清理</h3>
+      <p><code>loadState()</code> 不只是 <code>JSON.parse</code>，它还做三件事：</p>
+      <ol>
+        <li>把所有 <code>streaming</code> 置 <code>false</code>（刷新后不可能还在流）；</li>
+        <li>迁移旧版 <code>message.favorite</code> → 独立 <code>Favorite</code> 实体（幂等）；</li>
+        <li><code>gcBoardRefs()</code> 递归清理悬空引用，并把指向已删除对象的
+          <code>activeBoardId</code>/<code>activeTaskId</code>/<code>mainView</code> 回退。</li>
+      </ol>
+
+      <!-- ============================================================ -->
+      <h2 id="geometry">链路四 · 画板几何变更</h2>
+
+      <p>这是 v2 重写的核心。原则：<b>拖动/缩放期间不写 store，松手时提交一次</b>。</p>
+
+      <div class="flow">用户拖动卡片
+  │
+  ▼
+React Flow 内部 store（onNodesChange → applyNodeChanges）
+  │  坐标、尺寸、选中状态全部由框架持有
+  │  业务 store <b>此刻不动</b>
+  ▼
+onNodeDragStop / resize 松手
+  │
+  ▼
+commitGeometry()        ← board-canvas.tsx
+  │
+  ▼
+store.moveNode(id, x, y) / store.updateNode(id, {width, height})
+  │
+  ▼
+store 更新 → toDoc() 重算 BoardDoc → 画布拿到的 nodes 与框架一致
+                                  （因为源数据就是刚提交的那份）</div>
+
+      <h3 id="geometry-resize">缩放为什么单独抽 <code>resizeNode</code></h3>
+      <p>v1 的 bug："往左拉却向右长"。根因是<b>尺寸由 React Flow 内部算，位置由业务 store 管</b>，
+        两边各写一半，后者用旧值覆盖了前者。</p>
+      <p>v2 的解法：<code>model/resize.ts</code> 的 <code>resizeNode(box, dir, delta)</code>
+        是<b>唯一决定盒子怎么变的地方</b>。它同时返回新的 <code>x/y/width/height</code>——
+        向西/北拉时同步修正原点，所以位置和尺寸永远配套。</p>
+
+      <div class="flow">resizeNode({x:100, y:100, w:200, h:100}, "w", dx=-50)
+  →
+{ x: 50, y: 100, w: 250, h: 100 }
+     ↑ 原点左移，宽度增加，右边缘不动</div>
+
+      <h3 id="geometry-commit">为什么不在拖动中途写 store</h3>
+      <ul>
+        <li>写 store → <code>toDoc()</code> 重算 → 传回画布 → 与框架内部值竞争，出现回弹；</li>
+        <li>每帧写 <code>localStorage</code> 会卡顿（防抖 200ms 虽能缓解，但仍是浪费）；</li>
+        <li>中途写会让"撤销一次拖拽"变得困难。</li>
+      </ul>
+
+      <div class="note">
+        <strong>唯一例外：</strong>缩放手柄在拖动中会调用 <code>setNodes</code> 直接改
+        <b>React Flow 的</b> store（为了实时预览），但依然<b>不碰业务 store</b>，
+        松手时才落库。所以"两份真值"只在"框架内部实时预览"这一层存在，且方向单一。
+      </div>
+
+      <h3 id="geometry-create">新建卡片的落点</h3>
+      <p>由 <code>model/layout.ts</code> 的 <code>placeCard()</code> 决定，
+        入口统一走 store 的 <code>planPlacement()</code>：</p>
+      <ol>
+        <li>优先贴分支父卡片（向右偏移 <code>LAYOUT_GAP</code>）；</li>
+        <li>其次接同一对话的上一条卡片（向下）；</li>
+        <li>都不适用则全画布扫描空位；</li>
+        <li>扫描上限用尽则在包围盒右侧新开一列。</li>
+      </ol>
+      <p><b>硬约束：</b>绝不重叠、绝不移动已有卡片。任何非法输入（NaN、负尺寸）都被夹紧为有限坐标。</p>
+
+      <footer>
+        返回 <a href="index.html">系统总览</a> ·
+        <a href="modules.html">模块详情</a> ·
+        <a href="data.html">数据模型</a>
+      </footer>
+    </div>
+  </main>
+</div>
+
+<script src="assets/doc.js"></script>
+</body>
+</html>

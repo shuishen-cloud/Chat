@@ -1,0 +1,925 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>模块详情 · shadcn-chat 架构文档</title>
+<link rel="stylesheet" href="assets/doc.css">
+</head>
+<body>
+
+<header class="topbar">
+  <a class="brand" href="index.html">shadcn-chat <small>架构文档</small></a>
+  <nav class="topnav">
+    <a href="index.html">总览</a>
+    <a href="modules.html" aria-current="page">模块</a>
+    <a href="flows.html">链路</a>
+    <a href="data.html">数据</a>
+  </nav>
+  <span class="spacer"></span>
+  <div class="search"><input type="search" placeholder="搜索小节（/ 聚焦）" data-search aria-label="搜索小节"></div>
+</header>
+
+<div class="layout">
+
+  <aside class="sidebar">
+    <h2>本页目录</h2>
+    <ul data-toc></ul>
+    <h2>其它页面</h2>
+    <ul>
+      <li><a href="index.html">系统总览</a></li>
+      <li><a href="flows.html">四条主要链路</a></li>
+      <li><a href="data.html">数据模型与术语</a></li>
+    </ul>
+  </aside>
+
+  <main>
+    <div class="toc-source">
+      <h1>模块详情</h1>
+      <p class="lede">
+        按 L0–L5 分层，逐文件说明职责、关键导出与依赖。
+        图例：<span class="pill pure">纯函数</span> 不碰 React/DOM；
+        <span class="pill impure">含副作用</span> 读写存储/网络/DOM；
+        <span class="pill lazy">懒加载</span> 独立 chunk。
+      </p>
+
+      <!-- =========================================================== -->
+      <h2 id="l0">L0 · 入口层</h2>
+
+      <div class="card" id="m-index-html">
+        <div class="card-head">
+          <span class="name">index.html</span>
+          <span class="role">HTML 外壳</span>
+        </div>
+        <dl>
+          <dt>职责</dt><dd>声明 <code>&lt;div id="root"&gt;</code> 挂载点，预加载两个自托管字体，
+            引入 <code>/src/main.tsx</code>。</dd>
+          <dt>依赖</dt><dd><code>public/fonts/*</code>、<code>public/favicon.svg</code></dd>
+          <dt>注意</dt><dd>字体文件<b>不入库</b>（9.8MB），由部署机各自放置，
+            见 <code>public/fonts/README.md</code>。</dd>
+        </dl>
+      </div>
+
+      <div class="card" id="m-main-tsx">
+        <div class="card-head">
+          <span class="name">src/main.tsx</span>
+          <span class="role">React 根渲染</span>
+        </div>
+        <dl>
+          <dt>职责</dt><dd>10 行。<code>createRoot(#root).render(&lt;StrictMode&gt;&lt;App/&gt;)</code>。</dd>
+          <dt>依赖</dt><dd><code>App.tsx</code>、<code>index.css</code></dd>
+        </dl>
+      </div>
+
+      <div class="card" id="m-app-tsx">
+        <div class="card-head">
+          <span class="name">src/App.tsx</span>
+          <span class="role">布局根 · 251 行</span>
+        </div>
+        <dl>
+          <dt>职责</dt><dd>左侧栏 / 对话区 / 画板区三段式布局；画板宽度拖拽与持久化；
+            主题切换；各对话框开合；把画板 chunk 懒加载。</dd>
+          <dt>导出</dt><dd><code>App</code>（default）</dd>
+          <dt>持有状态</dt><dd>仅 UI 偏好：<code>settingsOpen</code>、<code>favoritesOpen</code>、
+            <code>historyOpen</code>、<code>draft</code>、<code>sidebarOpen</code>、
+            <code>boardOpen</code>、<code>boardWidth</code>。</dd>
+          <dt>依赖</dt><dd><code>useChatStore</code>、<code>ChatSidebar</code>、<code>ChatMain</code>、
+            <code>BoardPanel</code>(lazy)、<code>SettingsDialog</code>、<code>FavoritesPanel</code>、
+            <code>PromptHistoryPanel</code>、<code>ErrorBoundary</code>、<code>Toaster</code></dd>
+          <dt>注意</dt><dd>画板宽度存在 <code>localStorage["shadcn-chat/board-width"]</code>，
+            <b>不进 <code>ChatState</code></b>——它是纯 UI 偏好。上限取
+            <code>min(900, 窗口宽 × 0.7)</code>，保证对话区始终可用。</dd>
+        </dl>
+      </div>
+
+      <!-- =========================================================== -->
+      <h2 id="l1">L1 · 状态层</h2>
+
+      <div class="card" id="m-use-chat-store">
+        <div class="card-head">
+          <span class="name">src/hooks/use-chat-store.ts</span>
+          <span class="role">系统中枢 · 2129 行</span>
+          <span class="pill impure">含副作用</span>
+        </div>
+        <p>整个应用的<b>唯一真值</b>。一个 <code>useState&lt;ChatState&gt;</code> 装下所有业务数据，
+          外加约 80 个动作方法。所有视图组件通过 <code>props.store</code> 拿到它。</p>
+        <dl>
+          <dt>核心导出</dt><dd><code>useChatStore() → ChatStore</code>；<code>type ChatStore</code></dd>
+          <dt>内部机制</dt><dd>
+            <b>stateRef</b>：与 <code>setState</code> 同步更新的 ref，
+            让异步循环（如任务执行 for 循环）能立刻读到上一条刚写入的结果，不依赖过期闭包。<br>
+            <b>abortRef</b>：持有当前 <code>AbortController</code>，<code>stop()</code> 用它中断流。<br>
+            <b>防抖持久化</b>：<code>useEffect</code> 200ms 后 <code>saveState()</code>；
+            失败仅提示一次。
+          </dd>
+          <dt>方法分组</dt><dd>
+            <span class="mono">项目</span> add/rename/delete/selectProject<br>
+            <span class="mono">对话</span> add/select/rename/delete/clear/move/duplicate/togglePin/toggleArchive/unarchiveAll<br>
+            <span class="mono">消息</span> send/stop/regenerate/branchFrom/exportMarkdown/jumpToConversation<br>
+            <span class="mono">收藏</span> toggleFavorite/setFavoriteTags/setFavoriteNote/removeFavorites/tagFavorites<br>
+            <span class="mono">标签</span> addTag/renameTag/deleteTag/tagCounts<br>
+            <span class="mono">画板</span> addBoard/selectBoard/renameBoard/deleteBoard<br>
+            <span class="mono">节点</span> addMessageToBoard/addMessageToBoardSmart/addMessagesToBoard/addExcerptToBoard/addConversationToBoard/addNote/moveNode/updateNode/removeNodes/setNodeHue<br>
+            <span class="mono">连线</span> connectNodes/removeEdge/updateEdge/setEdgeLabel/setEdgeInstant/toggleEdgeKind/toggleEdgeEnabled/setEdgeHue<br>
+            <span class="mono">任务</span> addTask/renameTask/deleteTask/selectTask/toggleTaskEdge/runTask/runEdge/stopTask<br>
+            <span class="mono">结果</span> applyRun/restoreNodeContent/nodeText
+          </dd>
+          <dt>依赖</dt><dd><code>lib/storage</code>、<code>lib/types</code>、<code>lib/deepseek</code>、
+            <code>features/board-v2/model/layout</code>（<code>placeCard</code>）</dd>
+          <dt>关键实现</dt><dd><code>execEdge()</code> 是单条连线执行的<b>唯一实现</b>，
+            <code>runEdge</code>（单跑）与 <code>runTask</code>（跑一组）都调它，
+            保证两者语义完全一致。</dd>
+        </dl>
+        <div class="note warn">
+          <strong>已知痛点：</strong>2129 行单文件，集合了 8 类实体的增删改。
+          增加功能时容易继续膨胀；任何 state 变化都会让持有 <code>store</code> 的组件整体重渲染。
+        </div>
+      </div>
+
+      <div class="card" id="m-storage">
+        <div class="card-head">
+          <span class="name">src/lib/storage.ts</span>
+          <span class="role">持久化与清理</span>
+          <span class="pill impure">含副作用</span>
+        </div>
+        <dl>
+          <dt>导出</dt><dd><code>loadState()</code>、<code>saveState()</code>、
+            <code>gcBoardRefs()</code>、<code>withBoardGc()</code>、<code>nextTitle()</code></dd>
+          <dt>存储键</dt><dd><code>shadcn-chat/state/v1</code>（单一 JSON）</dd>
+          <dt>loadState 做的三件事</dt><dd>
+            1. 所有 <code>message.streaming</code> 置 <code>false</code>（刷新后不可能还在流）；<br>
+            2. <code>migrateLegacyFavorites()</code>：旧版 <code>message.favorite</code>
+               转成独立 <code>Favorite</code> 实体，并清掉旧字段（幂等）；<br>
+            3. <code>gcBoardRefs()</code> 清悬空引用；<code>activeBoardId</code>/<code>mainView</code>
+               指向已删除对象时回退。
+          </dd>
+          <dt>gcBoardRefs</dt><dd>递归清理链：画板 → 节点（引用的消息还在吗）→ 边（两端节点还在吗）
+            → 任务（引用的边还在吗）。所有删除类动作复用这一条链。</dd>
+          <dt>兜底</dt><dd><code>loadState</code> 整体 <code>try/catch</code>，解析失败返回空状态；
+            <code>saveState</code> 返回 <code>boolean</code>，配额满时由上层 toast 提示。</dd>
+        </dl>
+      </div>
+
+      <div class="card" id="m-types">
+        <div class="card-head">
+          <span class="name">src/lib/types.ts</span>
+          <span class="role">领域类型总表</span>
+          <span class="pill pure">纯函数</span>
+        </div>
+        <dl>
+          <dt>内容</dt><dd>全部 <code>interface</code> 与 <code>type</code> 的唯一出处：
+            <code>ChatState</code>、<code>Conversation</code>、<code>Message</code>、
+            <code>Favorite</code>、<code>Tag</code>、<code>Board</code>、<code>BoardNode</code>、
+            <code>BoardEdge</code>、<code>BoardTask</code>、<code>NodeRun</code>。</dd>
+          <dt>同时含工厂函数</dt><dd><code>createProject / createConversation / newMessage /
+            createBoard / createBoardNode / createNoteNode / createBoardEdge / createBoardTask</code>，
+            以及 <code>uid()</code>。<b>类型与工厂放在一起</b>是刻意的——新增字段时
+            工厂与类型在同一屏，不容易漏。</dd>
+          <dt>常量</dt><dd><code>MODELS</code>（3 个模型）、<code>DEFAULT_MODEL</code>、
+            <code>BOARD_NODE_W/H</code>、<code>TAG_HUES</code>、<code>isRunnableEdge()</code></dd>
+          <dt>注意</dt><dd>该文件被 <code>model/doc.ts</code> 反向导入 <code>NodeRun</code>。
+            这不是循环依赖（doc.ts 只取类型），但需留意。</dd>
+        </dl>
+      </div>
+
+      <!-- =========================================================== -->
+      <h2 id="l2">L2 · 服务层</h2>
+
+      <div class="card" id="m-deepseek">
+        <div class="card-head">
+          <span class="name">src/lib/deepseek.ts</span>
+          <span class="role">SSE 流式客户端</span>
+          <span class="pill impure">含副作用</span>
+        </div>
+        <dl>
+          <dt>导出</dt><dd><code>streamChat(opts) → Promise&lt;{content, reasoning}&gt;</code>、
+            <code>DeepSeekError</code></dd>
+          <dt>输入</dt><dd><code>{ apiKey, baseUrl, model, messages, thinkingEnabled, signal, onDelta, onReasoning }</code></dd>
+          <dt>协议</dt><dd>POST <code>{base}/v1/chat/completions</code>，<code>stream: true</code>；
+            用 <code>ReadableStream.getReader()</code> 读，按 <code>\n\n</code> 切 SSE 事件，
+            逐行取 <code>data:</code>，<code>[DONE]</code> 跳过。</dd>
+          <dt>增量通道</dt><dd><code>onDelta</code> 正文、<code>onReasoning</code> 思维链
+            （<code>reasoning_content</code>）。</dd>
+          <dt>请求体净化</dt><dd>发出前过滤掉 <code>error</code> 消息与空内容消息——
+            否则重试一条失败消息会把错误文本再喂给模型。</dd>
+          <dt>思考开关的保守实现</dt><dd><code>thinkingEnabled=false</code> 时<b>不发送任何非标参数</b>，
+            只是丢弃 <code>reasoning_content</code>。因为 DeepSeek 未公开思考开关字段，
+            发送未知字段可能导致整个请求被拒。</dd>
+          <dt>兜底</dt><dd>非 2xx 时解析 <code>error.message</code> 拼成可读错误；
+            无 <code>response.body</code>（旧浏览器）直接抛错。</dd>
+        </dl>
+      </div>
+
+      <!-- =========================================================== -->
+      <h2 id="l3">L3 · 领域层（画板模型）</h2>
+
+      <p>这一层的所有文件都是<b>纯函数</b>，不 import React 运行时、不碰 DOM，
+        因此可以用 <code>node --test</code> 脱离浏览器直接验证。</p>
+
+      <div class="card" id="m-doc">
+        <div class="card-head">
+          <span class="name">src/features/board-v2/model/doc.ts</span>
+          <span class="role">领域类型</span>
+          <span class="pill pure">纯函数</span>
+        </div>
+        <dl>
+          <dt>内容</dt><dd><code>BoardDoc</code>、<code>CardNode</code>、<code>MessageCard</code>、
+            <code>NoteCard</code>、<code>BoardEdgeDoc</code>、<code>EdgeKind</code>，
+            以及 <code>DEFAULT_WIDTH</code>、<code>MIN_SIZE</code>。</dd>
+          <dt>定位</dt><dd>画板子系统自己的"磁盘格式"——与 <code>lib/types</code> 的
+            <code>BoardNode</code> 形状不同，由 <code>store-adapter</code> 转换。</dd>
+          <dt>依赖</dt><dd>仅 <code>lib/types</code> 的 <code>NodeRun</code> 类型</dd>
+        </dl>
+      </div>
+
+      <div class="card" id="m-layout">
+        <div class="card-head">
+          <span class="name">src/features/board-v2/model/layout.ts</span>
+          <span class="role">落点计算 · 468 行</span>
+          <span class="pill pure">纯函数</span>
+        </div>
+        <dl>
+          <dt>导出</dt><dd><code>placeCard(input) → {x, y}</code>、
+            <code>findBranchParent()</code>、<code>findPreviousCard()</code>、<code>LAYOUT_GAP</code></dd>
+          <dt>要解决的问题</dt><dd>新卡片<b>不许与任何已有卡片重叠</b>。旧实现用
+            "已有卡片数取模"算网格，删卡后计数回流就把新卡压到旧卡上。</dd>
+          <dt>策略（优先级）</dt><dd>1. 贴分支父卡片（向右偏移）；2. 接同对话上一条卡片（向下）；
+            3. 全画布扫描空位；4. 扫描上限用尽则在大包围盒右侧新开一列。</dd>
+          <dt>不变量</dt><dd>任何输入都返回<b>有限</b>坐标（NaN/非法尺寸被夹紧）；
+            绝不移动已有卡片——用户拖过的位置是高价值信息。</dd>
+          <dt>调用方</dt><dd><code>use-chat-store</code> 的 <code>planPlacement()</code>，
+            被 5 个"加入画板"入口复用。</dd>
+        </dl>
+      </div>
+
+      <div class="card" id="m-map">
+        <div class="card-head">
+          <span class="name">src/features/board-v2/model/map.ts</span>
+          <span class="role">模型互映射 · 222 行</span>
+          <span class="pill pure">纯函数</span>
+        </div>
+        <dl>
+          <dt>导出</dt><dd><code>toFlow(doc)</code>、<code>fromFlow(...)</code>、<code>CardData</code></dd>
+          <dt>约定</dt><dd>业务字段全部塞进 <code>data.card</code>；
+            框架字段（<code>position</code>/<code>width</code>/<code>height</code>/<code>selected</code>）归 React Flow。
+            映射必须<b>可逆</b>：<code>fromFlow(toFlow(doc))</code> 与 <code>doc</code> 字段级等价。</dd>
+          <dt>依赖</dt><dd><code>@xyflow/react</code>（仅类型）、<code>dot.ts</code>、<code>view/edge-meta.ts</code></dd>
+        </dl>
+      </div>
+
+      <div class="card" id="m-resize">
+        <div class="card-head">
+          <span class="name">src/features/board-v2/model/resize.ts</span>
+          <span class="role">缩放几何 · 71 行</span>
+          <span class="pill pure">纯函数</span>
+        </div>
+        <dl>
+          <dt>导出</dt><dd><code>resizeNode(box, dir, delta) → Box</code>、<code>dirAffects()</code>、<code>ResizeDir</code></dd>
+          <dt>为什么独立成文件</dt><dd>v1 的 bug「往左拉却向右长」根因是缩放几何由 React Flow
+            内部算、又被业务 store 用旧尺寸覆盖。现在<b>唯一决定盒子怎么变的地方就是这里</b>，
+            方向不变量可以逐条断言。</dd>
+          <dt>约束</dt><dd>八向（n/s/e/w + 四角）；最小尺寸夹紧；向西/北拉时同步修正 <code>x</code>/<code>y</code>。</dd>
+        </dl>
+      </div>
+
+      <div class="card" id="m-machine">
+        <div class="card-head">
+          <span class="name">src/features/board-v2/interaction/machine.ts</span>
+          <span class="role">交互状态机 · 120 行</span>
+          <span class="pill pure">纯函数</span>
+        </div>
+        <dl>
+          <dt>导出</dt><dd><code>Interaction</code>（联合类型）、<code>transition()</code>、<code>InteractionKind</code></dd>
+          <dt>状态</dt><dd><code>idle | dragging | resizing | connecting | marquee | edge-menu</code></dd>
+          <dt>要解决的问题</dt><dd>v1 的"抢交互"：拉线抢拖拽、缩放手柄抢节点拖动。
+            这里改为<b>只在该状态下才挂对应事件</b>，不靠 CSS 层级和 opacity 去错开。</dd>
+        </dl>
+      </div>
+
+      <div class="card" id="m-store-adapter">
+        <div class="card-head">
+          <span class="name">src/features/board-v2/store-adapter.ts</span>
+          <span class="role">形状转换层</span>
+          <span class="pill pure">纯函数</span>
+        </div>
+        <dl>
+          <dt>导出</dt><dd><code>toDoc(boardNodes, boardEdges, boardId) → BoardDoc</code></dd>
+          <dt>职责</dt><dd>把 store 的 <code>BoardNode</code>/<code>BoardEdge</code> 投影成领域
+            <code>BoardDoc</code>。<code>view/</code> 不该知道 store 的形状，<code>model/</code> 更不该——
+            所有形状转换集中在这一个文件。</dd>
+          <dt>调用方</dt><dd><code>features/board-v2/index.tsx</code>，用 <code>useMemo</code>
+            按 <code>[boardNodes, boardEdges, boardId]</code> 缓存。</dd>
+        </dl>
+      </div>
+
+      <div class="card" id="m-board-v2-index">
+        <div class="card-head">
+          <span class="name">src/features/board-v2/index.tsx</span>
+          <span class="role">子系统唯一出口</span>
+        </div>
+        <dl>
+          <dt>导出</dt><dd><code>BoardView</code>（组件）、<code>type BoardDoc</code></dd>
+          <dt>职责</dt><dd>接 store → 投影 <code>BoardDoc</code>；把画布回调翻译成 store 方法调用。
+            <b>不持有画板业务状态</b>——<code>doc</code> 完全由 store 派生，用 <code>useMemo</code> 重算。</dd>
+          <dt>设计意义</dt><dd>内部结构（model / interaction / view）不对外泄漏，
+            以后调整内部实现不会波及 <code>BoardPanel</code>。</dd>
+          <dt>props</dt><dd><code>store</code>、<code>boardId</code>、<code>dark</code>、
+            <code>edgePickMode</code>、<code>selectedEdgeIds</code>、<code>executingEdgeId</code>、
+            <code>editingEdgeId</code>，以及 6 个回调。</dd>
+        </dl>
+      </div>
+
+      <!-- =========================================================== -->
+      <h2 id="l4">L4 · 视图层（画板）</h2>
+
+      <div class="card" id="m-board-canvas">
+        <div class="card-head">
+          <span class="name">src/features/board-v2/view/board-canvas.tsx</span>
+          <span class="role">React Flow 挂载 · 619 行</span>
+        </div>
+        <dl>
+          <dt>职责</dt><dd>挂载 React Flow；把画布事件翻译成领域文档变更，提交回 store。
+            <b>不写业务规则。</b></dd>
+          <dt>关键约束</dt><dd>
+            唯一真值 = React Flow 的 <code>useNodesState</code>/<code>useEdgesState</code>；<br>
+            不过滤 <code>NodeChange</code>（position/dimensions/select 全交给
+            <code>applyNodeChanges</code>）；<br>
+            不用 <code>useEffect</code> 把数据反向写回 store。
+          </dd>
+          <dt>提交时机</dt><dd>拖拽在 <code>onNodeDragStop</code>、缩放在松手时由
+            <code>commitGeometry</code> 一次性落库——几何变更期间不写 store，
+            避免两份坐标互相覆盖。</dd>
+          <dt>依赖</dt><dd><code>@xyflow/react</code>、<code>cards/*</code>、<code>handles</code>、
+            <code>resize-controls</code>、<code>edge-meta</code>、<code>long-press</code>、
+            <code>use-refresh-node-internals</code>、<code>interaction/machine</code></dd>
+        </dl>
+      </div>
+
+      <div class="card" id="m-card-shell">
+        <div class="card-head">
+          <span class="name">src/features/board-v2/view/cards/card-shell.tsx</span>
+          <span class="role">卡片通用外壳 · 148 行</span>
+        </div>
+        <dl>
+          <dt>导出</dt><dd><code>CardShell</code>、<code>CardHeader</code>、<code>CardIconButton</code>、<code>CardTone</code></dd>
+          <dt>职责</dt><dd>头部、边框、hue 着色、选中态、尺寸。两种卡片共享。</dd>
+          <dt>约束</dt><dd><b>不做业务判断</b>——有没有运行历史、能不能跳回原消息，
+            都由调用方通过 <code>actions</code> 传进来。卡片只负责画。</dd>
+          <dt>依赖</dt><dd><code>lib/hue</code></dd>
+        </dl>
+      </div>
+
+      <div class="card" id="m-body-editor">
+        <div class="card-head">
+          <span class="name">src/features/board-v2/view/cards/body-editor.tsx</span>
+          <span class="role">正文编辑态 · 112 行</span>
+        </div>
+        <dl>
+          <dt>职责</dt><dd>只读渲染 ↔ 编辑态切换；Esc 取消、失焦提交、撑满与滚动。</dd>
+          <dt>为什么抽出</dt><dd>消息卡片和便签卡片都需要这段逻辑，v1 里各写了一遍且不一致。</dd>
+          <dt>状态</dt><dd>编辑草稿完全受控：内部 <code>useState&lt;draft&gt;</code>，
+            进入编辑时用 <code>initial</code> 快照一次。<b>不依赖模块级可变状态。</b></dd>
+          <dt>依赖</dt><dd><code>ui/textarea</code></dd>
+        </dl>
+      </div>
+
+      <div class="card" id="m-message-card">
+        <div class="card-head">
+          <span class="name">src/features/board-v2/view/cards/message-card.tsx</span>
+          <span class="role">消息卡片 · 149 行</span>
+        </div>
+        <dl>
+          <dt>职责</dt><dd>渲染一条引用消息：摘录、改写、展开、运行历史、跳回原消息、取色、删除。</dd>
+          <dt>正文来源优先级</dt><dd><code>contentOverride</code> → <code>excerpt</code> → 源消息正文</dd>
+          <dt>依赖</dt><dd><code>Markdown</code>、<code>HistoryList</code>、<code>NodeHueButton</code>、
+            <code>CardHandles</code>、<code>ResizeControls</code>、<code>CardShell</code>、<code>BodyEditor</code></dd>
+        </dl>
+      </div>
+
+      <div class="card" id="m-note-card">
+        <div class="card-head">
+          <span class="name">src/features/board-v2/view/cards/note-card.tsx</span>
+          <span class="role">便签卡片 · 123 行</span>
+        </div>
+        <dl>
+          <dt>职责</dt><dd>自由文本便签（渲染 Markdown），<b>也是连线执行的落点</b>。</dd>
+          <dt>与消息卡片差异</dt><dd>正文来源是 <code>note</code> 字段；没有"跳回原消息"。
+            其余（编辑态、历史、手柄、颜色）全部复用同一套子组件。</dd>
+        </dl>
+      </div>
+
+      <div class="card" id="m-edge-meta">
+        <div class="card-head">
+          <span class="name">src/features/board-v2/view/edge-meta.ts</span>
+          <span class="role">连线外观 · 56 行</span>
+          <span class="pill pure">纯函数</span>
+        </div>
+        <dl>
+          <dt>导出</dt><dd><code>edgeTextOf()</code>、<code>edgePaletteOf()</code></dd>
+          <dt>规则</dt><dd>文本：<code>label</code>（线条文字）优先，其次 <code>prompt</code>，都没有则不显示；<br>
+            颜色：<code>hue</code> 优先，缺失回落旧字段 <code>promptHue</code>（兼容老数据），再缺失用主题色。</dd>
+          <dt>意义</dt><dd>让"线上显示什么、染成什么色"有唯一出处，被 <code>map.ts</code> 与画布共用。</dd>
+        </dl>
+      </div>
+
+      <div class="card" id="m-handles-model">
+        <div class="card-head">
+          <span class="name">src/features/board-v2/view/handles-model.ts</span>
+          <span class="role">手柄常量 · 30 行</span>
+          <span class="pill pure">纯函数</span>
+        </div>
+        <dl>
+          <dt>导出</dt><dd><code>SIDES</code>、<code>POSITION</code>、<code>handleId(side, role)</code></dd>
+          <dt>id 约定</dt><dd><code>s-</code> 前缀 = 源（拉出），<code>t-</code> 前缀 = 目标（落入）。</dd>
+          <dt>为什么不放组件里</dt><dd>Fast Refresh 要求一个文件只导出组件。</dd>
+        </dl>
+      </div>
+
+      <div class="card" id="m-handles">
+        <div class="card-head">
+          <span class="name">src/features/board-v2/view/handles.tsx</span>
+          <span class="role">连接手柄 · 43 行</span>
+        </div>
+        <dl>
+          <dt>职责</dt><dd>八向手柄（每边一源一目标），<code>connectionMode="loose"</code>。</dd>
+          <dt>v1 教训</dt><dd>手柄视觉 7px + <code>::after</code> 扩 10px + 一条 12px 透明热区 +
+            一层 ConnectingSurface，四层叠加导致"点不到 / 连线和拖拽打架"。
+            <b>v2 只保留一层</b>：手柄本体就是 20×20 命中盒，视觉用 <code>::before</code> 画小圆点。</dd>
+          <dt>依赖</dt><dd><code>@xyflow/react</code> 的 <code>Handle</code>、<code>handles-model</code></dd>
+        </dl>
+      </div>
+
+      <div class="card" id="m-long-press">
+        <div class="card-head">
+          <span class="name">src/features/board-v2/view/long-press.ts</span>
+          <span class="role">长按判定 · 118 行</span>
+          <span class="pill pure">纯函数</span>
+        </div>
+        <dl>
+          <dt>导出</dt><dd><code>useLongPress()</code>、纯函数部分、<code>LONG_PRESS_MS=500</code>、<code>LONG_PRESS_MOVE_TOLERANCE=6</code></dd>
+          <dt>为什么抽出纯函数</dt><dd>长按的 90% 是"什么时候<b>不该</b>触发"——中途位移、提前抬手、
+            组件卸载。写成纯函数后可用假时钟覆盖，不必开浏览器。</dd>
+          <dt>使用方</dt><dd>连线上长按 500ms 打开边编辑器；短按则执行这条线。</dd>
+        </dl>
+      </div>
+
+      <div class="card" id="m-resize-controls">
+        <div class="card-head">
+          <span class="name">src/features/board-v2/view/resize-controls.tsx</span>
+          <span class="role">缩放手柄 · 161 行</span>
+        </div>
+        <dl>
+          <dt>职责</dt><dd>八向手柄 + 四条边线。只做一件事：把拖拽手势翻译成
+            <code>resizeNode()</code> 的调用。</dd>
+          <dt>写入策略</dt><dd>拖动过程中把结果直接写回 React Flow store（<code>setNodes</code>），
+            松手时由画布的 <code>commitGeometry</code> 一次性落库——
+            <b>尺寸与坐标永远同源、同帧、同一次写库</b>。这是 v1「往左拉向右长」的修复方式。</dd>
+          <dt>依赖</dt><dd><code>useReactFlow</code>、<code>model/resize</code>、<code>model/doc</code></dd>
+        </dl>
+      </div>
+
+      <div class="card" id="m-use-refresh-node">
+        <div class="card-head">
+          <span class="name">src/features/board-v2/view/use-refresh-node-internals.ts</span>
+          <span class="role">量测刷新 · 34 行</span>
+        </div>
+        <dl>
+          <dt>职责</dt><dd>卡片内容/尺寸变化后调用 React Flow 的
+            <code>updateNodeInternals</code>，刷新 handle 量测。</dd>
+          <dt>解决的现象</dt><dd>React Flow 只在首次量测时记录每个 handle 坐标。卡片展开、
+            打开历史、改写、resize 导致高度变化后，<code>handleBounds</code> 仍是旧值，
+            连线就画到错误位置——典型表现是<b>"线从卡片上方的空白处出发"</b>。</dd>
+          <dt>为什么单独成文件</dt><dd>塞进 <code>board-canvas</code> 会拖累 Fast Refresh 边界，
+            也让画布更难读。</dd>
+        </dl>
+      </div>
+
+      <div class="card" id="m-board-panel">
+        <div class="card-head">
+          <span class="name">src/components/board-panel.tsx</span>
+          <span class="role">画板面板 · 542 行</span>
+          <span class="pill lazy">懒加载</span>
+        </div>
+        <dl>
+          <dt>职责</dt><dd>画板外壳：顶部工具条（切画板、新建、便签、多选、任务、最大化、关闭）、
+            下方 <code>BoardView</code>、边编辑器、任务下拉。</dd>
+          <dt>持有的 UI 状态</dt><dd><code>edgePickMode</code>、<code>selectedEdgeIds</code>、
+            <code>editingEdge</code>、<code>executingEdgeId</code>——都是<b>会话级临时状态</b>，
+            不落库。</dd>
+          <dt>依赖</dt><dd><code>features/board-v2</code>、<code>EdgeEditor</code>、
+            <code>use-chat-store</code>、<code>isRunnableEdge</code>、<code>useIsDark</code></dd>
+          <dt>为什么懒加载</dt><dd>它拉进 <code>@xyflow/react</code>（数百 KB），
+            首屏不需要。由 <code>App</code> 用 <code>React.lazy</code> 拆成独立 chunk。</dd>
+        </dl>
+      </div>
+
+      <!-- =========================================================== -->
+      <h2 id="l4-ui">L4 · 视图层（对话与侧栏）</h2>
+
+      <div class="card" id="m-chat-sidebar">
+        <div class="card-head">
+          <span class="name">src/components/chat-sidebar.tsx</span>
+          <span class="role">左栏 · 774 行</span>
+        </div>
+        <dl>
+          <dt>职责</dt><dd>项目列表与切换；对话列表（列表视图 / 分支树视图）；标题与全文搜索；
+            置顶、归档、复制、删除、颜色标记；收藏与设置入口。</dd>
+          <dt>两种视图</dt><dd><code>list</code>（平铺，按 <code>updatedAt</code> 排序）与
+            <code>tree</code>（按 <code>branchedFrom</code> 构建分叉树）。视图模式存
+            <code>state.sidebarView</code>。</dd>
+          <dt>依赖</dt><dd><code>store</code>、<code>HuePicker</code>、<code>ui/*</code></dd>
+        </dl>
+      </div>
+
+      <div class="card" id="m-chat-main">
+        <div class="card-head">
+          <span class="name">src/components/chat-main.tsx</span>
+          <span class="role">对话主区 · 917 行</span>
+        </div>
+        <dl>
+          <dt>职责</dt><dd>消息流渲染（Markdown + 思维链折叠 + 错误卡片）；输入框与发送；
+            单条消息动作（复制、收藏、分支、重新生成、加入画板）；多选批量加入画板；
+            选区划词浮层的挂载点；智能贴底滚动。</dd>
+          <dt>只发的动作</dt><dd>全部通过 <code>store.*</code>，自身只持输入草稿
+            <code>input</code>、多选集合 <code>selected</code> 等临时 UI 状态。</dd>
+          <dt>依赖</dt><dd><code>Markdown</code>、<code>BoardPickerMenu</code>、<code>QuickAskLayer</code>、
+            <code>useStickToBottom</code>、<code>useSelectionWatcher</code></dd>
+        </dl>
+      </div>
+
+      <div class="card" id="m-favorites-panel">
+        <div class="card-head">
+          <span class="name">src/components/favorites-panel.tsx</span>
+          <span class="role">收藏面板 · 797 行</span>
+        </div>
+        <dl>
+          <dt>职责</dt><dd>跨项目汇总所有 <code>Favorite</code>；搜索、按标签过滤、排序；
+            打标签、写备注、跳回原消息、批量取消收藏。</dd>
+          <dt>数据结构</dt><dd>收藏是<b>独立实体</b>（<code>Favorite</code>），不挂在
+            <code>Message.favorite</code> 上——这样收藏可以有自己的标签与备注。</dd>
+        </dl>
+      </div>
+
+      <div class="card" id="m-prompt-history">
+        <div class="card-head">
+          <span class="name">src/components/prompt-history.tsx</span>
+          <span class="role">提问历史 · 419 行</span>
+          <span class="pill impure">含副作用</span>
+        </div>
+        <dl>
+          <dt>导出</dt><dd><code>PromptHistoryPanel</code>、<code>usePromptHistory(conversations)</code></dd>
+          <dt>职责</dt><dd>记录用户提过的每条提示词，<b>按对话分组</b>，供快速重填输入框。</dd>
+          <dt>存储</dt><dd><code>shadcn-chat/prompt-history/v2</code>，每对话上限 100 条；
+            启动时清理旧版全局键 <code>.../v1</code>。</dd>
+        </dl>
+      </div>
+
+      <div class="card" id="m-settings-dialog">
+        <div class="card-head">
+          <span class="name">src/components/settings-dialog.tsx</span>
+          <span class="role">设置 · 192 行</span>
+        </div>
+        <dl>
+          <dt>职责</dt><dd>API Key（可切换明文/密文）、Base URL、模型下拉、思考开关。</dd>
+          <dt>写入</dt><dd><code>store.updateSettings()</code> → <code>ChatState</code> → localStorage。</dd>
+          <dt>打开方式</dt><dd>侧栏齿轮，或在报错 toast 的「去设置」按钮
+            （通过 <code>store.registerOpenSettings()</code> 反向注册回调）。</dd>
+        </dl>
+      </div>
+
+      <div class="card" id="m-quick-ask-layer">
+        <div class="card-head">
+          <span class="name">src/components/quick-ask-layer.tsx</span>
+          <span class="role">划词浮层管理 · 165 行</span>
+        </div>
+        <dl>
+          <dt>职责</dt><dd>监听选区，为每个选区创建/更新浮层实例；支持多个浮层同时存在；
+            切换对话时清空。</dd>
+          <dt>与 <code>SelectionQuickAsk</code> 的分工</dt><dd>本文件管<b>实例生命周期</b>，
+            真正渲染与请求在 <code>selection-quick-ask.tsx</code>。</dd>
+        </dl>
+      </div>
+
+      <div class="card" id="m-selection-quick-ask">
+        <div class="card-head">
+          <span class="name">src/components/selection-quick-ask.tsx</span>
+          <span class="role">划词追问窗 · 554 行</span>
+          <span class="pill impure">含副作用</span>
+        </div>
+        <dl>
+          <dt>职责</dt><dd>选中文字后浮出的可拖拽小窗：直接调 <code>streamChat</code>
+            <b>独立发起请求</b>（不写进主对话）；可复制、收藏、加入指定画板、展开为大窗。</dd>
+          <dt>关键点</dt><dd>这是<b>唯一绕过 store 直接调 deepseek 的地方</b>——
+            因为追问结果不进入对话历史。</dd>
+          <dt>上下文</dt><dd><code>SelectionContext</code> 含 <code>text</code> 与
+            <code>markdown</code>（由 <code>rangeToMarkdown</code> 还原结构）。</dd>
+        </dl>
+      </div>
+
+      <div class="card" id="m-board-picker-menu">
+        <div class="card-head">
+          <span class="name">src/components/board-picker-menu.tsx</span>
+          <span class="role">画板选择下拉 · 85 行</span>
+        </div>
+        <dl>
+          <dt>职责</dt><dd>统一的"放进哪个画板"菜单，含"新建画板"。</dd>
+          <dt>为什么抽出</dt><dd>三个入口都需要（多选栏、划词浮层、消息动作条），
+            菜单结构完全一样。抽出来避免新增入口时又抄一份导致行为漂移。</dd>
+        </dl>
+      </div>
+
+      <div class="card" id="m-hue-picker">
+        <div class="card-head">
+          <span class="name">src/components/hue-picker.tsx</span>
+          <span class="role">取色器 · 67 行</span>
+        </div>
+        <dl>
+          <dt>职责</dt><dd>8 个固定预设色 + "无颜色"。<code>layout</code> 支持
+            <code>row</code>（边编辑器/会话菜单）与 <code>column</code>（画板节点）。</dd>
+          <dt>为什么用固定预设</dt><dd>标记色的目的是"快速区分几类"，预设可预测、跨设备一致，
+            也不用处理任意色在暗色下的对比度问题。</dd>
+          <dt>依赖</dt><dd><code>lib/hue</code> 的 <code>HUE_PRESETS</code>、<code>hueDot</code></dd>
+        </dl>
+      </div>
+
+      <div class="card" id="m-node-hue-button">
+        <div class="card-head">
+          <span class="name">src/components/board/node-hue-button.tsx</span>
+          <span class="role">卡片取色入口 · 59 行</span>
+        </div>
+        <dl>
+          <dt>职责</dt><dd>卡片角上的小色点，点开取色。<b>未标记时显示虚线空心圆</b>，与已标记的实心点区分。</dd>
+          <dt>两个坑</dt><dd>
+            1. 必须加 <code>nodrag</code> 类，否则在 React Flow 里点它会顺带拖动卡片；<br>
+            2. 必须 <code>portal</code> 到 body——卡片是 <code>overflow-hidden</code> 的，
+            弹层留在卡片内会被裁掉（矮卡片上几乎只能看到第一个色点）。
+          </dd>
+          <dt>依赖</dt><dd><code>HuePicker</code>、<code>ui/floating-layer</code></dd>
+        </dl>
+      </div>
+
+      <div class="card" id="m-edge-editor">
+        <div class="card-head">
+          <span class="name">src/components/board/edge-editor.tsx</span>
+          <span class="role">连线悬浮编辑器 · 197 行</span>
+        </div>
+        <dl>
+          <dt>职责</dt><dd>长按/点击连线时出现在按下点位置的小面板：编辑线条文字、执行提示词、
+            即执行开关、删除。</dd>
+          <dt>三个概念严格分开</dt><dd>
+            <b>线条文字 label</b>：画在线上，任何线都能有，输入即写回；<br>
+            <b>执行提示词 prompt</b>：送模型的要求，只在"即执行"开启时有意义。
+            编辑中留在本地（避免每敲一个字就写 localStorage），「保存/立即执行」时落库；<br>
+            <b>即执行</b>：一个开关同时决定 <code>kind</code> 与 <code>enabled</code>——
+            开 = 点击线即执行，关 = 纯视觉联系。
+          </dd>
+          <dt>颜色</dt><dd>只保留一个取色器，线/箭头/文字徽章同源，避免两套配色打架。</dd>
+          <dt>为什么不遮罩</dt><dd>刻意不用全屏遮罩：点其他线/卡片时可以直接切换，不打断画布操作。</dd>
+        </dl>
+      </div>
+
+      <div class="card" id="m-history-list">
+        <div class="card-head">
+          <span class="name">src/components/board/history-list.tsx</span>
+          <span class="role">运行历史 · 150 行</span>
+        </div>
+        <dl>
+          <dt>职责</dt><dd>展示某个节点的 <code>NodeRun[]</code>：每次执行的提示词快照、
+            输入材料、输出。失败项红色并显示错误。<b>可一键回填</b>到节点当前内容。</dd>
+          <dt>交互</dt><dd>同时只展开一条，避免长历史把卡片撑爆。</dd>
+          <dt>上限</dt><dd>store 侧每次执行 <code>runs</code> 只保留最新 50 条。</dd>
+        </dl>
+      </div>
+
+      <div class="card" id="m-error-boundary">
+        <div class="card-head">
+          <span class="name">src/components/error-boundary.tsx</span>
+          <span class="role">局部错误边界 · 55 行</span>
+        </div>
+        <dl>
+          <dt>职责</dt><dd>捕获子树渲染异常，显示兜底 UI，避免整个应用白屏。</dd>
+          <dt>props</dt><dd><code>label</code>（区域名，用于提示）、<code>resetKey</code>
+            （变化时重置错误状态——关闭面板再打开应恢复）。</dd>
+          <dt>包裹对象</dt><dd>画板（<code>resetKey = activeBoardId</code>）、收藏面板。</dd>
+        </dl>
+      </div>
+
+      <div class="card" id="m-markdown">
+        <div class="card-head">
+          <span class="name">src/components/markdown.tsx</span>
+          <span class="role">Markdown 渲染 · 107 行</span>
+        </div>
+        <dl>
+          <dt>导出</dt><dd><code>Markdown</code>、<code>TypingCursor</code></dd>
+          <dt>职责</dt><dd>用 <code>react-markdown</code> + <code>remark-gfm</code> 渲染；
+            自定义 <code>pre</code> 为带复制按钮的 <code>CodeBlock</code>；
+            链接 <code>target="_blank"</code>。</dd>
+          <dt>注意</dt><dd>不用 Streamdown（太重）。流式过程中未闭合的代码块会补齐，避免闪烁。</dd>
+        </dl>
+      </div>
+
+      <div class="card" id="m-use-scroll">
+        <div class="card-head">
+          <span class="name">src/hooks/use-scroll.ts</span>
+          <span class="role">滚动与选区 hook · 159 行</span>
+          <span class="pill impure">含副作用</span>
+        </div>
+        <dl>
+          <dt>导出</dt><dd><code>useStickToBottom(dep)</code>、<code>useSelectionWatcher()</code></dd>
+          <dt>useStickToBottom</dt><dd>用户没有手动上滚时自动跟随到底部；距底 &lt; 80px 视为"贴底"。
+            上滚后停止跟随，回到底部自动恢复。</dd>
+          <dt>useSelectionWatcher</dt><dd>监听鼠标选择，把 DOM 选区交给
+            <code>rangeToMarkdown()</code> 转成带结构的 Markdown，产出
+            <code>SelectionContext</code>。</dd>
+        </dl>
+      </div>
+
+      <div class="card" id="m-use-is-dark">
+        <div class="card-head">
+          <span class="name">src/hooks/use-is-dark.ts</span>
+          <span class="role">主题读取 · 24 行</span>
+          <span class="pill impure">含副作用</span>
+        </div>
+        <dl>
+          <dt>职责</dt><dd>用 <code>MutationObserver</code> 观察
+            <code>&lt;html class="dark"&gt;</code> 得到当前是否暗色。</dd>
+          <dt>为什么不透传</dt><dd>主题真源就是那个 class（由 <code>App.useTheme</code> 维护），
+            直接观察它比把 boolean 层层传下去更不容易漏。</dd>
+          <dt>使用方</dt><dd>画板（<code>BoardView</code> 需要 <code>dark</code> 决定 hue 取哪套色）。</dd>
+        </dl>
+      </div>
+
+      <!-- =========================================================== -->
+      <h2 id="l5">L5 · 基座层</h2>
+
+      <div class="card" id="m-ui-primitives">
+        <div class="card-head">
+          <span class="name">src/components/ui/*.tsx</span>
+          <span class="role">shadcn/ui 原语 · 14 个文件</span>
+        </div>
+        <p>全部是对 <code>@base-ui/react</code> 的薄封装（<code>data-slot</code> 标记 + Tailwind 类），
+          由 shadcn CLI 生成后手工微调。<b>不含业务语义</b>，可原样替换。</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>文件</th><th>用途</th><th>底层</th></tr></thead>
+            <tbody>
+              <tr id="m-ui-button"><td><a href="#m-ui-button"><code>src/components/ui/button.tsx</code></a></td><td>按钮，6 变体 × 6 尺寸（cva）</td><td>Base UI Button</td></tr>
+              <tr id="m-ui-dialog"><td><a href="#m-ui-dialog"><code>src/components/ui/dialog.tsx</code></a></td><td>模态框（设置、历史）</td><td>Base UI Dialog</td></tr>
+              <tr id="m-ui-alert-dialog"><td><a href="#m-ui-alert-dialog"><code>src/components/ui/alert-dialog.tsx</code></a></td><td>二次确认（删除）</td><td>Base UI AlertDialog</td></tr>
+              <tr id="m-ui-dropdown-menu"><td><a href="#m-ui-dropdown-menu"><code>src/components/ui/dropdown-menu.tsx</code></a></td><td>下拉菜单、复选/单选菜单项</td><td>Base UI Menu</td></tr>
+              <tr id="m-ui-sheet"><td><a href="#m-ui-sheet"><code>src/components/ui/sheet.tsx</code></a></td><td>侧滑面板</td><td>Base UI Dialog</td></tr>
+              <tr id="m-ui-tooltip"><td><a href="#m-ui-tooltip"><code>src/components/ui/tooltip.tsx</code></a></td><td>悬浮提示</td><td>Base UI Tooltip</td></tr>
+              <tr id="m-ui-checkbox"><td><a href="#m-ui-checkbox"><code>src/components/ui/checkbox.tsx</code></a></td><td>勾选框（幽灵 input 已压制）</td><td>Base UI Checkbox</td></tr>
+              <tr id="m-ui-input"><td><a href="#m-ui-input"><code>src/components/ui/input.tsx</code></a></td><td>单行输入</td><td>Base UI Input</td></tr>
+              <tr id="m-ui-textarea"><td><a href="#m-ui-textarea"><code>src/components/ui/textarea.tsx</code></a></td><td>多行输入</td><td>原生 textarea</td></tr>
+              <tr id="m-ui-label"><td><a href="#m-ui-label"><code>src/components/ui/label.tsx</code></a></td><td>表单标签</td><td>原生 label</td></tr>
+              <tr id="m-ui-separator"><td><a href="#m-ui-separator"><code>src/components/ui/separator.tsx</code></a></td><td>分隔线</td><td>div</td></tr>
+              <tr id="m-ui-scroll-area"><td><a href="#m-ui-scroll-area"><code>src/components/ui/scroll-area.tsx</code></a></td><td>自定义滚动条</td><td>原生溢出</td></tr>
+              <tr id="m-ui-sonner"><td><a href="#m-ui-sonner"><code>src/components/ui/sonner.tsx</code></a></td><td>toast 容器 <code>Toaster</code></td><td>sonner</td></tr>
+              <tr id="m-ui-floating-layer"><td><a href="#m-ui-floating-layer"><code>src/components/ui/floating-layer.tsx</code></a></td><td>Portal + 自动翻转定位的浮层</td><td>createPortal</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="note">
+          <strong>floating-layer 值得单独记：</strong>画板卡片是 <code>overflow-hidden</code> 的，
+          节点内任何 absolute 弹层一旦超出卡片边界就会被裁掉——而且 <code>z-index</code> 无法
+          逃出溢出裁剪。所以浮层必须 portal 到 body，同时脱离 React Flow 的 transform 缩放上下文。
+          定位策略：水平夹在视口内；垂直默认向下，放不下就翻转向上。
+        </div>
+      </div>
+
+      <div class="card" id="m-hue">
+        <div class="card-head">
+          <span class="name">src/lib/hue.ts</span>
+          <span class="role">配色派生 · 62 行</span>
+          <span class="pill pure">纯函数</span>
+        </div>
+        <dl>
+          <dt>导出</dt><dd><code>HUE_PRESETS</code>、<code>hueBg</code>、<code>hueBorder</code>、
+            <code>hueText</code>、<code>hueStroke</code>、<code>hueDot</code></dd>
+          <dt>模型</dt><dd>颜色不存 RGB，存<b>色相角 0–360</b>。所有函数签名都带
+            <code>dark: boolean</code>，强制给出明暗两套值。</dd>
+          <dt>为什么</dt><dd>暗色主题不能复用浅色的高亮度值，否则刺眼过曝。
+            把 <code>dark</code> 做成必填参数，编译器就会逼你两边都想清楚。</dd>
+          <dt>使用方</dt><dd>画板卡片、连线、侧栏会话标记、收藏标签</dd>
+        </dl>
+      </div>
+
+      <div class="card" id="m-selection-md">
+        <div class="card-head">
+          <span class="name">src/lib/selection-to-markdown.ts</span>
+          <span class="role">选区还原 Markdown · 425 行</span>
+          <span class="pill pure">纯函数</span>
+        </div>
+        <dl>
+          <dt>导出</dt><dd><code>rangeToMarkdown(range) → string</code></dd>
+          <dt>为什么不用 <code>selection.toString()</code></dt><dd>
+            表格里浏览器用 <code>\t</code> 连接单元格，丢失表头/分隔行；<br>
+            代码块依赖文本节点拼接，缩进、空行、高亮拆出的 span 都会失真；<br>
+            列表、引用、链接会退化成纯文本。
+          </dd>
+          <dt>做法</dt><dd>按节点类型重新序列化：块级标签补换行、<code>PRE</code> 保留原文、
+            表格重建表头与分隔行、列表按层级缩进。</dd>
+          <dt>依赖</dt><dd>仅标准 DOM，<b>不依赖 React</b></dd>
+        </dl>
+      </div>
+
+      <div class="card" id="m-utils">
+        <div class="card-head">
+          <span class="name">src/lib/utils.ts</span>
+          <span class="role">一行转发</span>
+        </div>
+        <dl>
+          <dt>职责</dt><dd><code>export { cn } from "cn"</code>——把 <code>cn</code> 包一层，
+            保证全项目 <code>@/lib/utils</code> 引用路径统一，未来换实现只改一行。</dd>
+        </dl>
+      </div>
+
+      <div class="card" id="m-index-css">
+        <div class="card-head">
+          <span class="name">src/index.css</span>
+          <span class="role">样式入口</span>
+        </div>
+        <dl>
+          <dt>职责</dt><dd>Tailwind v4 入口（一条 <code>@import</code> 引入框架）；
+            <code>@theme</code> 定义设计令牌（颜色/圆角）；<code>:root</code> 与
+            <code>.dark</code> 两套 CSS 变量；系统字体栈；<code>.prose-chat</code>
+            Markdown 排版规则。</dd>
+          <dt>约束</dt><dd>不引外部字体 CDN；正文与代码均用系统字体栈。</dd>
+        </dl>
+      </div>
+
+      <!-- =========================================================== -->
+      <h2 id="build">构建与部署</h2>
+
+      <div class="card">
+        <div class="card-head">
+          <span class="name">vite.config.ts</span>
+          <span class="role">构建配置</span>
+        </div>
+        <dl>
+          <dt>插件</dt><dd><code>@vitejs/plugin-react</code>、<code>@tailwindcss/vite</code></dd>
+          <dt>别名</dt><dd><code>@ → ./src</code></dd>
+          <dt>固定端口</dt><dd><code>127.0.0.1:5199</code>，<code>strictPort</code>。
+            <b>刻意为之</b>：<code>scripts/test-*.cjs</code> 默认连这个地址，
+            而 Vite 默认端口是 5173/5174 且只监听 <code>[::1]</code>，会让测试直接连接被拒。</dd>
+        </dl>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <span class="name">Dockerfile + nginx.conf</span>
+          <span class="role">部署</span>
+        </div>
+        <dl>
+          <dt>两阶段</dt><dd>builder（<code>node:22-alpine</code>，<code>npm ci</code> + <code>npm run build</code>）
+            → runtime（<code>nginx:1.27-alpine</code>，只拷 <code>dist/</code>）。</dd>
+          <dt>nginx 做的事</dt><dd>SPA 回落（所有未知路径 → <code>index.html</code>）；
+            gzip；<code>/assets/</code> 强缓存 1 年（内容哈希文件名）；
+            安全头（<code>X-Content-Type-Options</code>、<code>X-Frame-Options</code>、<code>Referrer-Policy</code>）。</dd>
+          <dt>依赖缓存</dt><dd>先只拷 <code>package*.json</code> 与 <code>.npmrc</code> 装依赖，
+            改源码不会导致重装。</dd>
+        </dl>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <span class="name">scripts/test-*.cjs</span>
+          <span class="role">端到端测试</span>
+        </div>
+        <dl>
+          <dt>技术</dt><dd>Playwright 驱动 Chromium，连接已启动的 dev server。</dd>
+          <dt>用例规模</dt><dd><code>test-board.cjs</code> 约 37 个用例，覆盖画板全部交互；
+            <code>test-quick-ask.cjs</code> 覆盖划词浮层；<code>test-deploy.cjs</code> 验证部署产物。</dd>
+          <dt>速度设计</dt><dd>全进程单浏览器 + 每用例独立 context（存储天然隔离）+
+            轮询等待替代固定 sleep；34s → 14s。</dd>
+          <dt>写法纪律</dt><dd>不用 <code>waitForTimeout</code>，用
+            <code>untilCount</code>/<code>untilVisible</code>/<code>untilState</code>
+            （store 有 200ms 防抖，直接读 localStorage 可能是旧值）。</dd>
+        </dl>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <span class="name">scripts/test-doc-html.cjs</span>
+          <span class="role">本文档的自检</span>
+        </div>
+        <dl>
+          <dt>职责</dt><dd>校验 <code>doc/html/</code> 与 <code>src/</code> 的一致性：
+            覆盖度（每个源文件都出现）、死链、跨页锚点、无外部依赖、页面结构、
+            索引表入口数。运行 <code>node scripts/test-doc-html.cjs</code>。</dd>
+        </dl>
+      </div>
+
+      <footer>
+        返回 <a href="index.html">系统总览</a> ·
+        <a href="flows.html">四条主要链路</a> ·
+        <a href="data.html">数据模型</a>
+      </footer>
+    </div>
+  </main>
+</div>
+
+<script src="assets/doc.js"></script>
+</body>
+</html>

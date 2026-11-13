@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>数据模型与术语 · shadcn-chat 架构文档</title>
+<link rel="stylesheet" href="assets/doc.css">
+</head>
+<body>
+
+<header class="topbar">
+  <a class="brand" href="index.html">shadcn-chat <small>架构文档</small></a>
+  <nav class="topnav">
+    <a href="index.html">总览</a>
+    <a href="modules.html">模块</a>
+    <a href="flows.html">链路</a>
+    <a href="data.html" aria-current="page">数据</a>
+  </nav>
+  <span class="spacer"></span>
+  <div class="search"><input type="search" placeholder="搜索小节（/ 聚焦）" data-search aria-label="搜索小节"></div>
+</header>
+
+<div class="layout">
+
+  <aside class="sidebar">
+    <h2>本页目录</h2>
+    <ul data-toc></ul>
+    <h2>其它页面</h2>
+    <ul>
+      <li><a href="index.html">系统总览</a></li>
+      <li><a href="modules.html">模块详情</a></li>
+      <li><a href="flows.html">四条主要链路</a></li>
+    </ul>
+  </aside>
+
+  <main>
+    <div class="toc-source">
+      <h1>数据模型与术语</h1>
+      <p class="lede">
+        全部类型定义在 <code>src/lib/types.ts</code>。这里只列字段含义与相互引用关系，
+        不重复类型语法（看源码更快）。
+      </p>
+
+      <!-- ============================================================ -->
+      <h2 id="er">实体关系</h2>
+
+      <div class="flow"><b>Project</b> 1 ──── n <b>Conversation</b> 1 ──── n <b>Message</b>
+   │                      │                        │
+   │                      │                        │ (引用，不复制)
+   │                      │                        ▼
+   │                      │                  <b>BoardNode</b>.ref
+   │                      │                        │
+   │                      └──── <b>Favorite</b> ──────┘ (conversationId + messageId)
+   │                             │
+   │                             └─ n <b>Tag</b>（多对多，存 tagIds）
+   │
+   └── n <b>Board</b>（也可 projectId = null 表示跨项目共享）
+           │
+           ├── n <b>BoardNode</b> ──┐
+           │                     │ from / to（有向）
+           ├── n <b>BoardEdge</b> ──┘
+           │        │
+           │        └── 被 <b>BoardTask</b>.edgeIds 引用
+           │
+           └── n <b>BoardTask</b></div>
+
+      <div class="note">
+        <strong>关键设计：</strong><code>BoardNode</code> 对消息只存
+        <code>{conversationId, messageId}</code>，<b>不复制正文</b>。
+        源消息更新卡片跟着变；源消息删除时由 <code>gcBoardRefs()</code> 清理。
+        用户在卡片上改写时写入 <code>contentOverride</code>，此时卡片与源消息脱钩。
+      </div>
+
+      <!-- ============================================================ -->
+      <h2 id="state">ChatState 全字段</h2>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>字段</th><th>类型</th><th>说明</th></tr></thead>
+          <tbody>
+            <tr><td><code>projects</code></td><td><code>Project[]</code></td><td>项目列表，首次进入自动建一个</td></tr>
+            <tr><td><code>conversations</code></td><td><code>Conversation[]</code></td><td>全部对话，含消息正文</td></tr>
+            <tr><td><code>favorites</code></td><td><code>Favorite[]</code></td><td>收藏实体，独立于消息</td></tr>
+            <tr><td><code>tags</code></td><td><code>Tag[]</code></td><td>收藏用的标签，带色相</td></tr>
+            <tr><td><code>boards</code></td><td><code>Board[]</code></td><td>画板</td></tr>
+            <tr><td><code>boardNodes</code></td><td><code>BoardNode[]</code></td><td>全部画板的卡片（扁平存放，靠 <code>boardId</code> 区分）</td></tr>
+            <tr><td><code>boardEdges</code></td><td><code>BoardEdge[]</code></td><td>连线</td></tr>
+            <tr><td><code>boardTasks</code></td><td><code>BoardTask[]</code></td><td>任务（一组边）</td></tr>
+            <tr><td><code>activeProjectId</code></td><td><code>string | null</code></td><td>当前项目</td></tr>
+            <tr><td><code>activeConversationId</code></td><td><code>string | null</code></td><td>当前对话</td></tr>
+            <tr><td><code>activeBoardId</code></td><td><code>string | null</code></td><td>当前画板</td></tr>
+            <tr><td><code>activeTaskId</code></td><td><code>string | null</code></td><td>当前任务</td></tr>
+            <tr><td><code>mainView</code></td><td><code>"chat" | "board"</code></td><td>主视图（决定画板面板开合）</td></tr>
+            <tr><td><code>apiKey</code></td><td><code>string</code></td><td>DeepSeek Key，<b>明文存 localStorage</b></td></tr>
+            <tr><td><code>baseUrl</code></td><td><code>string</code></td><td>默认 <code>https://api.deepseek.com</code></td></tr>
+            <tr><td><code>model</code></td><td><code>string</code></td><td>默认 <code>deepseek-v4-pro</code></td></tr>
+            <tr><td><code>thinkingEnabled</code></td><td><code>boolean</code></td><td>是否展示思维链</td></tr>
+            <tr><td><code>sidebarView</code></td><td><code>"list" | "tree"</code></td><td>侧栏平铺 / 分支树</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="note warn">
+        <strong>安全提醒：</strong><code>apiKey</code> 以明文存在 <code>localStorage</code>。
+        任何能在该域执行 JS 的东西（含浏览器扩展）都能读到它。
+        这是纯前端直连模型的固有代价。
+      </div>
+
+      <!-- ============================================================ -->
+      <h2 id="entities">实体逐个说明</h2>
+
+      <h3 id="e-conversation">Conversation</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>字段</th><th>说明</th></tr></thead>
+          <tbody>
+            <tr><td><code>id / projectId</code></td><td>所属项目</td></tr>
+            <tr><td><code>title</code></td><td>首条用户消息前 24 字，可手动改</td></tr>
+            <tr><td><code>messages</code></td><td>消息数组，顺序即时间序</td></tr>
+            <tr><td><code>branchedFrom</code></td><td>分支来源：<code>{conversationId, conversationTitle, messageId}</code>。用于侧栏树视图与画板落点</td></tr>
+            <tr><td><code>hue</code></td><td>侧栏颜色标记（色相 0–360）</td></tr>
+            <tr><td><code>pinned / archived</code></td><td>置顶 / 归档</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3 id="e-message">Message</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>字段</th><th>说明</th></tr></thead>
+          <tbody>
+            <tr><td><code>role</code></td><td><code>"user" | "assistant"</code></td></tr>
+            <tr><td><code>content</code></td><td>正文（Markdown）</td></tr>
+            <tr><td><code>reasoning</code></td><td>思维链，可折叠展示</td></tr>
+            <tr><td><code>streaming</code></td><td>流式进行中。持久化时强制置 <code>false</code></td></tr>
+            <tr><td><code>error</code></td><td>失败信息。带此字段的消息<b>不会</b>被再次发给模型</td></tr>
+            <tr><td><code>favorite / favoritedAt</code></td><td><b>已废弃</b>，启动时迁移到 <code>Favorite</code> 并清除</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3 id="e-boardnode">BoardNode</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>字段</th><th>说明</th></tr></thead>
+          <tbody>
+            <tr><td><code>kind</code></td><td><code>"message"</code>（引用型） / <code>"note"</code>（便签）</td></tr>
+            <tr><td><code>ref</code></td><td><code>{conversationId, messageId}</code>，仅 message 型</td></tr>
+            <tr><td><code>excerpt</code></td><td>只摘录部分文字时保存的片段，空 = 整段引用</td></tr>
+            <tr><td><code>contentOverride</code></td><td>用户改写或执行产出。存在时优先于 <code>excerpt</code>/源消息，<b>UI 标「已改写」</b></td></tr>
+            <tr><td><code>note</code></td><td>用户批注；便签型的正文也在这里</td></tr>
+            <tr><td><code>x / y</code></td><td>画布坐标（左上角）</td></tr>
+            <tr><td><code>width / height</code></td><td>用户拖拽过的尺寸；空 = 默认宽度自适应内容</td></tr>
+            <tr><td><code>expanded</code></td><td>展开显示完整正文</td></tr>
+            <tr><td><code>runs</code></td><td><code>NodeRun[]</code>，最新在前，上限 50</td></tr>
+            <tr><td><code>hue</code></td><td>颜色标记</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h4>正文优先级（重要）</h4>
+      <div class="flow"><b>contentOverride</b>  （用户改写 / 连线执行结果）
+      ↓ 不存在时
+<b>excerpt</b>          （划词摘录的片段）
+      ↓ 不存在时
+源消息 <b>content</b>     （kind = message）
+<b>note</b>               （kind = note，便签只有这一层）</div>
+
+      <h3 id="e-edge">BoardEdge</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>字段</th><th>说明</th></tr></thead>
+          <tbody>
+            <tr><td><code>kind</code></td><td><code>"manual" | "reference" | "branch" | "flow"</code></td></tr>
+            <tr><td><code>label</code></td><td><b>线条文字</b>：画在线上，任何线都能有</td></tr>
+            <tr><td><code>prompt</code></td><td><b>执行提示词</b>：送模型的要求，仅 flow 有意义</td></tr>
+            <tr><td><code>enabled</code></td><td><code>undefined</code> 视为 true；任务运行时过滤</td></tr>
+            <tr><td><code>sourceHandle / targetHandle</code></td><td>四向连接点标识，避免节点换边后连线错位</td></tr>
+            <tr><td><code>hue</code></td><td>线的颜色</td></tr>
+            <tr><td><code>promptHue</code></td><td>旧字段：提示词徽章的独立颜色。新数据不再写，读时回落</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="note why">
+        <strong>label 和 prompt 为什么要分开：</strong>它们是两件事。
+        "这条线表示 A 依赖 B" 是给人看的文字；"把材料改写成摘要" 是给模型的要求。
+        早期版本只有一个字段，导致给线写个说明就意外变成可执行提示词。
+      </div>
+
+      <h3 id="e-run">NodeRun</h3>
+      <p>一次连线执行的<b>快照</b>：<code>edgeId</code>、<code>prompt</code>（当时的）、
+        <code>inputs[]</code>（当时的输入材料）、<code>output</code>、可选 <code>error</code>。
+        即使之后改了线，历史仍显示当时的值。</p>
+
+      <h3 id="e-task">BoardTask</h3>
+      <p>用户显式挑选的一组边，构成一次可反复执行的上下文组织。
+        <b>不做拓扑排序、不自动串联</b>——每条边都是独立执行单元。</p>
+
+      <h3 id="e-favorite">Favorite / Tag</h3>
+      <p>收藏是独立实体，携带自己的 <code>tagIds</code> 与 <code>note</code>。
+        标签有 <code>name</code> 与 <code>hue</code>。删除消息时收藏被 GC。</p>
+
+      <!-- ============================================================ -->
+      <h2 id="glossary">术语表</h2>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>术语</th><th>含义</th></tr></thead>
+          <tbody>
+            <tr><td><b>hue</b></td><td>色相角 0–360。所有"颜色"都以它存储而非 RGB，由 <code>lib/hue</code> 派生明暗两套</td></tr>
+            <tr><td><b>引用型节点</b></td><td><code>kind="message"</code>，指向一条真实消息的画板卡片</td></tr>
+            <tr><td><b>便签节点</b></td><td><code>kind="note"</code>，自由文本，也是连线执行的落点</td></tr>
+            <tr><td><b>可执行边</b></td><td><code>kind="flow" && enabled !== false</code>，由 <code>isRunnableEdge()</code> 判定</td></tr>
+            <tr><td><b>线条文字</b></td><td><code>edge.label</code>，画在线上给人看</td></tr>
+            <tr><td><b>执行提示词</b></td><td><code>edge.prompt</code>，送模型的要求</td></tr>
+            <tr><td><b>即执行</b></td><td>边编辑器里的一个开关，同时控制 <code>kind</code> 与 <code>enabled</code></td></tr>
+            <tr><td><b>已改写</b></td><td>节点有 <code>contentOverride</code>，与源消息脱钩</td></tr>
+            <tr><td><b>GC</b></td><td><code>gcBoardRefs()</code>，递归清理悬空引用（画板→节点→边→任务）</td></tr>
+            <tr><td><b>落点</b></td><td>新卡片放置的坐标，由 <code>placeCard()</code> 计算，保证不重叠</td></tr>
+            <tr><td><b>BFS/分支树</b></td><td>侧栏 <code>tree</code> 视图，按 <code>branchedFrom</code> 构建</td></tr>
+            <tr><td><b>划词浮层</b></td><td>选中文字后出现的小窗，独立发起请求，不写入对话</td></tr>
+            <tr><td><b>思维链</b></td><td>SSE 的 <code>reasoning_content</code>，存于 <code>message.reasoning</code></td></tr>
+            <tr><td><b>贴底</b></td><td>滚动位置距底部 &lt; 80px，此时自动跟随新内容</td></tr>
+            <tr><td><b>幽灵 input</b></td><td>勾选框底层被平移出视口的真实 checkbox，平板系统仍会绘制它</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- ============================================================ -->
+      <h2 id="constants">常量速查</h2>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>常量</th><th>值</th><th>位置</th></tr></thead>
+          <tbody>
+            <tr><td><code>STORAGE_KEY</code></td><td><code>shadcn-chat/state/v1</code></td><td>storage.ts</td></tr>
+            <tr><td><code>DEFAULT_MODEL</code></td><td><code>deepseek-v4-pro</code></td><td>types.ts</td></tr>
+            <tr><td><code>DEFAULT_BASE_URL</code></td><td><code>https://api.deepseek.com</code></td><td>types.ts</td></tr>
+            <tr><td><code>DEFAULT_BOARD_WIDTH</code></td><td>620 px</td><td>App.tsx</td></tr>
+            <tr><td><code>BOARD 宽度范围</code></td><td>360 – min(900, 视口×0.7)</td><td>App.tsx</td></tr>
+            <tr><td><code>LAYOUT_GAP</code></td><td>32 px</td><td>model/layout.ts</td></tr>
+            <tr><td><code>LONG_PRESS_MS</code></td><td>500 ms</td><td>view/long-press.ts</td></tr>
+            <tr><td><code>LONG_PRESS_MOVE_TOLERANCE</code></td><td>6 px</td><td>view/long-press.ts</td></tr>
+            <tr><td><code>runs 上限</code></td><td>50 条 / 节点</td><td>use-chat-store.ts</td></tr>
+            <tr><td><code>提问历史上限</code></td><td>100 条 / 对话</td><td>prompt-history.tsx</td></tr>
+            <tr><td><code>保存防抖</code></td><td>200 ms</td><td>use-chat-store.ts</td></tr>
+            <tr><td><code>贴底阈值</code></td><td>80 px</td><td>use-scroll.ts</td></tr>
+            <tr><td><code>HUE_PRESETS</code></td><td>45, 20, 150, 200, 240, 280, 320, 100</td><td>lib/hue.ts</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <footer>
+        返回 <a href="index.html">系统总览</a> ·
+        <a href="modules.html">模块详情</a> ·
+        <a href="flows.html">四条主要链路</a>
+      </footer>
+    </div>
+  </main>
+</div>
+
+<script src="assets/doc.js"></script>
+</body>
+</html>
