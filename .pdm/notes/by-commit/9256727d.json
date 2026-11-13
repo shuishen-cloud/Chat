@@ -1,8 +1,8 @@
 {
-  "commit": "08c22eee",
+  "commit": "9256727d",
   "notes": [
     {
-      "commit": "08c22eee",
+      "commit": "9256727d",
       "kind": "pitfall",
       "title": "后代选择器命不中兄弟节点：上一版修复完全无效",
       "detail": "Base UI 的 Checkbox 把幽灵 input 渲染成自绘根节点的**相邻兄弟**（children: [span, input]），不是子节点。上一版 CSS 写成 '[data-slot=checkbox] input[type=checkbox]'，选择器永不匹配，实测 computed appearance 仍是 auto，等于没修。正确写法是相邻兄弟选择器 '[data-slot=checkbox] + input[type=checkbox]'。",
@@ -36,7 +36,7 @@
       "created_at": "2026-11-13T07:17:08.152845+00:00"
     },
     {
-      "commit": "08c22eee",
+      "commit": "9256727d",
       "kind": "difficulty",
       "title": "内联 style 只能靠 !important 覆盖，同时要保留业务可覆盖性",
       "detail": "幽灵 input 带内联 style（clip-path/1px/margin/position 等），普通选择器（含 :where() 单用，特异性 0）压不过内联声明。方案：用 html 前缀抬高优先级 + 逐条 !important。选择器主体仍包在 :where() 里，避免特异性膨胀到影响业务侧对勾选框的覆盖。",
@@ -70,7 +70,7 @@
       "created_at": "2026-11-13T07:17:11.588079+00:00"
     },
     {
-      "commit": "08c22eee",
+      "commit": "9256727d",
       "kind": "problem",
       "title": "Indicator 被 after 伪元素的 padding box 带偏 1px",
       "detail": "Checkbox 根节点用 after:-inset-x-3 -inset-y-2 把可用区域扩到约 24×26，Indicator 参与布局时按这个更大的盒子居中对齐，导致勾比 14×14 的方框偏移约 1px（实测方框 299,242 / 勾 300,243）。改成 pointer-events-none absolute inset-0 后，勾以方框自身为参照，误差为 0。",
@@ -104,7 +104,7 @@
       "created_at": "2026-11-13T07:17:11.637476+00:00"
     },
     {
-      "commit": "08c22eee",
+      "commit": "9256727d",
       "kind": "controlled-exception",
       "title": "系统级放大镜/朗读选中框无法用 CSS 干预",
       "detail": "若真机仍被遮挡，可能是 OS 层面的放大镜或朗读选中框，不属于 DOM，任何样式都改不了。当前方案只保证 DOM 内不再由系统按原生控件绘制。已在设计文档「已知限制」中登记，需要用户提供设备与浏览器信息才能进一步定位。",

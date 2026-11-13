@@ -1,23 +1,24 @@
 {
-  "count": 23,
+  "count": 24,
   "by_kind": {
     "difficulty": 6,
     "pitfall": 11,
-    "problem": 1,
     "controlled-exception": 2,
-    "bug": 3
+    "bug": 3,
+    "problem": 2
   },
   "by_status": {
-    "noted": 23
+    "noted": 24
   },
   "by_issue": {},
   "commits": [
     "0541122a",
-    "08c22eee",
+    "1b328261",
     "2acae31f",
     "34d71c5f",
     "5b162332",
     "6adb4dcf",
+    "9256727d",
     "94cf2202",
     "a1ee5914",
     "d88db27f",

@@ -1,0 +1,39 @@
+{
+  "commit": "1b328261",
+  "notes": [
+    {
+      "commit": "1b328261",
+      "kind": "problem",
+      "title": "测试里写死 rgba(0,0,0,0) 会偶发假失败",
+      "detail": "取消勾选后方框背景受 hover/transition 影响，computed 值可能是带 alpha 的 oklab（实测 oklab(0.205 0 0 / 0.110068)），断言成立与否取决于指针巧合停在元素上。改为断��「勾选后背景 ≠ 取消后背景」，只表达语义不写死颜色。",
+      "author": "human:unknown",
+      "files": [
+        "scripts/test-native-control.cjs"
+      ],
+      "severity": "low",
+      "status": "noted",
+      "catches": [],
+      "verifications": [
+        {
+          "kind": "test",
+          "target": "scripts/test-native-control.cjs::ghostInputStaysSuppressedAfterToggle",
+          "command": "",
+          "method": "APP_URL=http://127.0.0.1:5199/ node scripts/test-native-control.cjs",
+          "script": "",
+          "expected": "2/2 通过",
+          "note": "",
+          "cwd": "",
+          "last_run_at": null,
+          "last_status": "unknown",
+          "last_output": ""
+        }
+      ],
+      "issue_id": null,
+      "resolves": [],
+      "tags": [
+        "ui/checkbox"
+      ],
+      "created_at": "2026-11-13T07:18:16.718425+00:00"
+    }
+  ]
+}

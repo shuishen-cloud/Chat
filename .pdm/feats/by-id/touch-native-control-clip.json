@@ -32,11 +32,11 @@
   "impact": "仅影响自定义 Checkbox 与 Switch 的隐藏 input 与勾选渲染；表单提交路径不变（input 仍 in DOM、name/value 不变），桌面端视觉无变化",
   "importance": "high",
   "commits": [
-    "e0489be336a1ca7d52af7ae9866a811c72fdb7d6",
-    "c27248c54516adb45df82fad1a81c2a63fd8dd20",
-    "08c22eeefc08c0e01b7048dce5a75146b26c7c7b",
-    "204a74a5928285d3f9ebf465b83ba90529ced8fa",
-    "52227bbb5c3aff09eda3842850902c3287462c62"
+    "1619d9a17b50eef5cca334afe8834165d8d02a5b",
+    "ca5b4d6320bb586fd3c2c51155362192b7c5e0c9",
+    "9256727d39f1105c4ef613d503c615382e5f4243",
+    "1b3282618e18f3c2c2bb0ed6f01e2fff5e80dd74",
+    "099815767bdb0ff1b2172ebc90ce6ae5b10f01b9"
   ],
   "notes": [],
   "discovered": [],
