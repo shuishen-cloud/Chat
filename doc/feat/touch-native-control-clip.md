@@ -105,3 +105,55 @@ root: { bg: "rgba(0, 0, 0, 0)", ariaChecked: "false" }
 
 - **系统级**放大镜 / 朗读选中框由 OS 绘制，不属于 DOM，CSS 无法干预。若真机仍被遮挡，需要设备与浏览器信息另行定位。
 - 该兜底依赖 Base UI 的 DOM 结构（根节点 + 相邻 input）。若上游改了结构，需要同步调整选择器；`[data-slot=switch]` 一并覆盖因为 Switch 用同样的 `type="checkbox"` 幽灵 input。
+
+## 实现与校验结果
+
+### 落地清单
+
+| 文件 | 改动 |
+|---|---|
+| `src/index.css` | 新增 `html :where([data-slot="checkbox"] + input[type="checkbox"], [data-slot="switch"] + input[type="checkbox"])` 规则，逐条 `!important` 压制幽灵 input |
+| `src/components/ui/checkbox.tsx` | 根节点补 `bg-transparent` / `select-none` / `[-webkit-tap-highlight-color:transparent]`；Indicator 改 `pointer-events-none absolute inset-0` |
+| `src/components/ui/dropdown-menu.tsx` | `DropdownMenuCheckboxItem` 补 `data-checked:bg-accent` 常显勾选态（触屏无 hover） |
+| `scripts/test-native-control.cjs` | 回归测试，断言 computed style 与几何，而非像素截图 |
+
+### 实测对照（Playwright + iPad Pro 11 设备描述符 + Chromium）
+
+| 状态 | 修复前 | 修复后 |
+|---|---|---|
+| 幽灵 input `appearance` | `auto`（系统会绘制） | `none` |
+| 幽灵 input `opacity` / 尺寸 | `1` / `1×1`（系统仍可能溢出绘制） | `0` / `1×1` |
+| 幽灵 input 命中 | 可参与 | `pointer-events: none` |
+| 勾相对方框偏移 | `dx=1, dy=1` | `dx=0, dy=0` |
+
+修复前的 `appearance: auto` 就是本 bug 的直接证据：系统会照原生控件再画一遍这个 1px 的 input。
+
+### 踩到的三个坑
+
+1. **后代选择器命不中兄弟节点**（严重）
+   Base UI 把幽灵 input 渲染成根节点的相邻兄弟（`children: [<span>, <input>]`）。
+   上一版 CSS 写成 `[data-slot="checkbox"] input[type="checkbox"]`，永不匹配 ——
+   实测 computed `appearance` 仍是 `auto`，即上一版修复完全无效。
+   必须用相邻兄弟选择器 `+`。
+2. **内联 style 只能靠 `!important` 覆盖**
+   幽灵 input 带内联样式，`:where()` 单独用特异性为 0，压不过内联声明。
+   方案：`html` 前缀抬高优先级 + 逐条 `!important`，选择器主体仍包在 `:where()` 保持对外友好。
+3. **Indicator 被 `after` 伪元素撑大的 padding box 带偏**
+   根节点 `after:-inset-x-3 -inset-y-2` 把可用区域扩到约 24×26，参与布局的 Indicator
+   按这个更大的盒子居中，勾比方框偏 1px。改 `absolute inset-0` 后误差为 0。
+
+### 已知限制
+
+- **系统级**放大镜 / 朗读选中框由 OS 绘制，不属于 DOM，CSS 无法干预。
+  若真机仍被遮挡，需提供设备型号与浏览器 UA 才能进一步定位；已在 `pdm` 中登记为可控异常。
+- 该兜底依赖 Base UI 的 DOM 结构（根节点 + 相邻 input）。上游若改结构，需同步调整选择器；
+  已顺手覆盖 `[data-slot="switch"]`（Switch 用同样的 `type="checkbox"` 幽灵 input）。
+
+### 验证
+
+```bash
+npm run build
+npx vite preview --port 5199 &
+APP_URL=http://127.0.0.1:5199/ node scripts/test-native-control.cjs
+# 2/2 通过
+```
