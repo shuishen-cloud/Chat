@@ -1,0 +1,48 @@
+{
+  "slug": "touch-native-control-clip",
+  "title": "平板浏览器原生控件遮挡自绘勾选框：压制 Base UI 幽灵 input 的系统绘制",
+  "kind": "fix",
+  "status": "draft",
+  "doc": "feat/touch-native-control-clip.md",
+  "api": [
+    "无：Checkbox 组件 props 未变，仍为 CheckboxPrimitive.Root.Props"
+  ],
+  "logs": [
+    "无：不产生运行时日志"
+  ],
+  "fallbacks": [
+    "样式类修复对不支持 appearance 的极老浏览器退化为 opacity:0 + 1px 裁剪，依旧不可见；若系统仍绘制（如系统级放大镜），需要真机确认并提供设备/浏览器信息"
+  ],
+  "design_note": "Base UI 的 Checkbox/Switch 会在自绘根节点旁额外渲染一个仅供表单提交的 input，其样式只有内联的 visuallyHidden（clip-path/1px/absolute），缺少 appearance:none。桌面浏览器不绘制它，所以问题长期不可见；平板（iPadOS/安卓/国产浏览器）会按系统外观再画一遍这个 1px 控件，原生勾选图标、点按高亮、放大镜/朗读选中框会溢出 1px 盒子压到自绘方框上，表现为勾选被系统默认图标遮挡。修复必须作用在那个幽灵 input 上，且要压过它的内联 style。",
+  "impl_note": "CSS 用相邻兄弟选择器 [data-slot=checkbox] + input[type=checkbox]（幽灵 input 是根节点的兄弟而非子节点），并以 html 前缀提高优先级 + !important 压内联样式，把它彻底收成 appearance:none / opacity:0 / 1x1 / pointer-events:none。Checkbox 组件补 bg-transparent、select-none、-webkit-tap-highlight-color:transparent，并把 Indicator 改成 absolute inset-0，避免被根节点 after 伪元素撑大的 padding box 带偏。",
+  "data_model": [
+    "无：纯样式与组件结构修正，不引入数据结构"
+  ],
+  "samples": [
+    "无：视觉/命中行为，无外部数据样例"
+  ],
+  "changes": [
+    "src/index.css::新增 :root 级规则 —— 压制 [data-slot=checkbox]/[data-slot=switch] + input[type=checkbox]",
+    "src/components/ui/checkbox.tsx::Checkbox —— 根节点补 bg-transparent/select-none/tap-highlight 透明；Indicator 改 absolute inset-0",
+    "src/components/ui/dropdown-menu.tsx::DropdownMenuCheckboxItem —— 补 data-checked 态背景，触屏无 hover 时勾选可见"
+  ],
+  "test_note": "Playwright（iPad Pro 11 设备描述符 + Chromium）驱动真实页面：注入收藏数据打开收藏面板，断言幽灵 input 的 computed appearance=none/opacity=0/尺寸 1x1/位于根节点之外；点击后 aria-checked=true、根节点背景变为 --primary、Indicator 12x12 居中于方框；再点一次复位",
+  "debug_note": "",
+  "extend_note": "",
+  "impact": "仅影响自定义 Checkbox 与 Switch 的隐藏 input 与勾选渲染；表单提交路径不变（input 仍 in DOM、name/value 不变），桌面端视觉无变化",
+  "importance": "high",
+  "commits": [
+    "e0489be336a1ca7d52af7ae9866a811c72fdb7d6",
+    "c27248c54516adb45df82fad1a81c2a63fd8dd20",
+    "08c22eeefc08c0e01b7048dce5a75146b26c7c7b",
+    "204a74a5928285d3f9ebf465b83ba90529ced8fa"
+  ],
+  "notes": [],
+  "discovered": [],
+  "stage": "fix",
+  "reviews": {},
+  "comments": {},
+  "stage_reviews": {},
+  "created_at": "2026-11-13T07:16:29.454395+00:00",
+  "updated_at": "2026-11-13T07:17:18.703093+00:00"
+}
