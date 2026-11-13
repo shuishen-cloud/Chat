@@ -157,6 +157,8 @@ function DropdownMenuCheckboxItem({
       data-inset={inset}
       className={cn(
         "relative flex cursor-default items-center gap-1.5 rounded-md py-1 pr-8 pl-1.5 text-sm outline-hidden select-none focus:bg-accent focus:text-accent-foreground focus:**:text-accent-foreground data-inset:pl-7 data-disabled:pointer-events-none data-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+        // 触屏下没有 hover，菜单项无法进入 focus 态，勾选状态必须常显
+        "data-checked:bg-accent data-checked:text-accent-foreground [@media(hover:none)]:data-checked:bg-accent",
         className
       )}
       checked={checked}

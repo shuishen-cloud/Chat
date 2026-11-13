@@ -647,3 +647,31 @@
 }
 .board2-resize-line.board2-resize-left { left: -5px; cursor: ew-resize; }
 .board2-resize-line.board2-resize-right { right: -5px; cursor: ew-resize; }
+
+/*
+ * Base UI 的 Checkbox/Switch 会在根节点旁渲染一个仅用于表单提交的 `<input>`，
+ * 它只有内联的 visuallyHidden 样式，**没有 `appearance: none`**。
+ * 平板（iPadOS / 安卓）会依据系统外观额外绘制这个 1px 的 input ——
+ * 原生勾选图标、点按高亮、朗读/放大镜选中框都可能压到自绘方框上。
+ *
+ * 注意两条约束：
+ * 1. 这个 input 是根节点的**兄弟**而非子节点，选择器不能写后代形式；
+ * 2. 它带内联 `style`，普通 class/属性选择器赢不了，必须提高优先级
+ *    （用 `html` 前缀 + `:where()` 保持对业务类友好）。
+ */
+html :where([data-slot="checkbox"] + input[type="checkbox"],
+            [data-slot="switch"] + input[type="checkbox"]) {
+  appearance: none !important;
+  -webkit-appearance: none !important;
+  background: transparent !important;
+  border: 0 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  width: 1px !important;
+  height: 1px !important;
+  opacity: 0 !important;
+  clip-path: inset(50%) !important;
+  overflow: hidden !important;
+  pointer-events: none !important;
+  -webkit-tap-highlight-color: transparent !important;
+}
