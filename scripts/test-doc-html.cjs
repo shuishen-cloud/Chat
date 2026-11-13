@@ -191,7 +191,51 @@ function checkStructure(pages, pageMap) {
   ok(`结构：${pages.length} 个页面均有 h1 / nav / 互链`)
 }
 
-/* ---------------- 断言 6：索引表可机械校验 ---------------- */
+/* ---------------- 断言 6：锚点可达性 ---------------- */
+
+/**
+ * 「id 存在」不等于「能从某处到达」。
+ *
+ * 教训（见 doc/feat/architecture-html.md）：早期版本里 47 个模块卡片的 id 都在，
+ * 但侧栏目录只从 h2/h3 抽取，模块一个都点不到——前五条断言全绿。
+ * 这里反向校验：每个模块卡片锚点至少被一条内联链接指向。
+ */
+function checkAnchorReachability(pageMap) {
+  // 页面 → 被内联链接引用的 id 集合
+  const reachable = new Map()
+  for (const name of pageMap.keys()) reachable.set(name, new Set())
+
+  for (const [page, html] of pageMap) {
+    for (const href of hrefsOf(html)) {
+      if (href.startsWith("#") && href.length > 1) {
+        reachable.get(page).add(href.slice(1))
+      } else if (href.includes(".html#")) {
+        const [filePart, hash] = href.split("#")
+        const target = filePart.replace(/^.*\//, "")
+        if (reachable.has(target) && hash) reachable.get(target).add(hash)
+      }
+    }
+  }
+
+  let checked = 0
+  for (const [page, html] of pageMap) {
+    // 只校验模块卡片：<div class="card" id="m-xxx"> 与 <div class="card" ... id="...">
+    for (const m of html.matchAll(/<div\s+([^>]*)>/g)) {
+      const attrs = m[1]
+      if (!/class="[^"]*\bcard\b/.test(attrs)) continue
+      const idMatch = attrs.match(/id="([^"]+)"/)
+      if (!idMatch) continue
+      const id = idMatch[1]
+      checked++
+      if (!reachable.get(page).has(id)) {
+        fail(`${page}: 模块锚点 #${id} 存在但无任何链接指向，无法从页面到达`)
+      }
+    }
+  }
+  ok(`可达性：${checked} 个模块卡片锚点均有链接指向`)
+}
+
+/* ---------------- 断言 7：索引表可机械校验 ---------------- */
 
 function checkIndexTable(pageMap) {
   const index = pageMap.get("index.html")
@@ -219,6 +263,7 @@ if (pages.length > 0) {
   checkLinks(pages, pageMap)
   checkOffline(pages, pageMap)
   checkStructure(pages, pageMap)
+  checkAnchorReachability(pageMap)
   checkIndexTable(pageMap)
 }
 
