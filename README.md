@@ -83,43 +83,71 @@ npm run preview  # 预览构建产物
 npm run lint     # oxlint
 ```
 
-构建产物校验（字体、nginx/docker 配置）：
+构建产物校验（字体、docker 配置）：
 
 ```bash
 npm run build
 node scripts/test-deploy.cjs
+node scripts/test-remote-state.cjs   # 服务端存储与多端同步
 ```
 
 ## 部署
 
-项目是纯静态站点，构建后 `dist/` 即可直接托管。生产环境用 Docker + Nginx。
+服务端是**一个 Node 进程**：既提供 `/api/state`（对话数据的权威副本），
+也直接发送 `dist/` 静态产物。不再需要 nginx —— 对话历史必须由常驻进程
+读写，纯静态托管做不到多端共享。
+
+### 为什么不再是纯静态
+
+旧版本把状态存在浏览器 `localStorage`，每台设备各一份。现在服务端保存
+唯一副本，各端启动时拉取，因此「刷新后多端看到同一份历史」。
+
+代价是必须有后端进程与一份持久化目录。
 
 ### Docker
 
 ```bash
-# 构建镜像（多阶段：node 构建 → nginx 运行）
+# 构建镜像（多阶段：node 构建产物 → node 运行服务端）
 docker build -t shadcn-chat:latest .
 
-# 启动
-docker run -d --name shadcn-chat -p 8080:80 --restart unless-stopped shadcn-chat:latest
+# 启动：必须挂数据卷，否则容器重建会丢掉全部对话
+docker run -d --name shadcn-chat \
+  -p 3000:3000 \
+  -v shadcn-chat-data:/app/data \
+  --restart unless-stopped \
+  shadcn-chat:latest
 ```
 
-镜像基于 `nginx:1.27-alpine`，`nginx.conf` 已包含：
+运行阶段基于 `node:22-alpine`（Node 22 可直接执行 TypeScript，无需编译步骤）：
 
 | 配置 | 作用 |
 |---|---|
-| `try_files $uri $uri/ /index.html` | SPA 前端路由刷新不 404 |
-| `/assets/` `immutable` 缓存 1 年 | 产物带内容哈希，可强缓存 |
-| `index.html` `no-cache` | 发版后用户能拿到新资源引用 |
-| gzip | 压缩 JS/CSS/SVG |
-| `server_tokens off` + 安全头 | 不暴露版本、防嗅探 |
+| `VOLUME /app/data` | 对话状态目录，必须挂卷持久化 |
+| `STATE_FILE=/app/data/state.json` | 状态文件路径 |
+| `PORT=3000` | 监听端口 |
 
-### 已有 Nginx
+服务端负责的事项：
 
-不使用 Docker 时，把 `dist/` 上传到服务器，然后参照 `nginx.conf` 配置站点。
-核心只有一条 —— SPA 必须回落到 `index.html`：
+| 能力 | 说明 |
+|---|---|
+| `GET /api/state` | 返回 `{updatedAt, state}`，服务端为空时 `state` 为 `null` |
+| `PUT /api/state?base=` | 整包覆盖写入；`base` 不匹配返回 `409`，避免旧快照覆盖新数据 |
+| SPA 回落 | 未知路径返回 `index.html`，`/api/*` 仍返回 404 |
+| `/assets/` 强缓存 | 产物带内容哈希，可缓存一年 |
+| `index.html` no-cache | 发版后能拿到新资源引用 |
+| 原子写入 | 先写临时文件再 rename，进程被杀不会留下半截 JSON |
+
+### 已有 nginx
+
+若坚持用 nginx 发静态产物，需要把 `/api/` 反代到上面的 Node 进程，
+否则多端同步不可用：
 
 ```nginx
+location /api/ {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_set_header Host $host;
+}
+
 location / {
     try_files $uri $uri/ /index.html;
 }
@@ -129,15 +157,15 @@ location / {
 
 若部署在 `https://host/chat/` 这类子路径下，需在 `vite.config.ts` 设置
 `base: '/chat/'` 后重新构建，否则 `/assets/...` 会指向根路径而 404。
-默认配置为根路径部署（`base: '/'`）。
+默认配置为根路径部署（`base: '/'`）。注意 `/api/` 仍按绝对路径请求，
+反向代理需相应调整。
 
 ### 关于 API 代理
 
-应用是**浏览器直连** `api.deepseek.com`，API Key 只存在用户浏览器
-`localStorage`。因此 `nginx.conf` **不代理** API —— 反代意味着 Key 要经过
-服务端，与「无后端、Key 不出浏览器」的设计冲突。
+应用仍是**浏览器直连** `api.deepseek.com`，API Key 随状态一起存在服务端
+`state.json`（各端填一次即可，无需重复配置）。
 
-如果目标环境无法直连外网，需要自行加 `proxy_pass`，并接受 Key 经服务端转发的后果。
+如果目标环境无法直连外网，需要由服务端代理请求，届时 Key 只在服务端使用。
 
 ## 目录结构
 

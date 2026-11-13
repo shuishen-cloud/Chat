@@ -110,23 +110,27 @@ const cases = {
     assert(/AS\s+builder/i.test(df), "Dockerfile 缺 builder 阶段")
     assert(/npm ci/.test(df), "Dockerfile 应用 npm ci 保证可复现")
     assert(/COPY --from=builder/i.test(df), "Dockerfile 未从 builder 拷贝产物")
-    assert(/EXPOSE\s+80/.test(df), "Dockerfile 未 EXPOSE 80")
+    /*
+     * 已从 nginx 单容器切到 Node 单容器（feat: remote-state-sync）：
+     * 对话状态需要一个常驻进程读写，nginx 只能发静态文件。
+     */
+    assert(/EXPOSE\s+3000/.test(df), "Dockerfile 未 EXPOSE 3000")
+    assert(/node:22-alpine/.test(df), "运行阶段应基于 node:22-alpine")
+    assert(/server\/index\.ts/.test(df), "Dockerfile 未启动服务端")
+    // 状态文件必须挂在卷上，否则容器重建丢全部对话
+    assert(/VOLUME\s+\["\/app\/data"\]/.test(df), "Dockerfile 未为状态目录声明 VOLUME")
+    assert(/STATE_FILE=\/app\/data\/state\.json/.test(df), "Dockerfile 未固定 STATE_FILE")
   },
 
-  /** nginx 配置覆盖 SPA 回落、缓存与压缩 */
-  nginxConf() {
-    assert(exists("nginx.conf"), "缺少 nginx.conf")
-    const nginx = read("nginx.conf").replace(/\s+/g, " ")
-    assert(/try_files\s+\$uri\s+\$uri\/\s+\/index\.html/.test(nginx), "缺 SPA try_files 回落")
-    assert(/gzip\s+on/.test(nginx), "未开启 gzip")
-    assert(/location\s+\/assets\//.test(nginx), "缺 /assets/ 独立缓存策略")
-    assert(/immutable/.test(nginx), "/assets/ 缺 immutable 长缓存")
-    assert(/server_tokens\s+off/.test(nginx), "未隐藏 nginx 版本")
-    // index.html 必须短缓存，否则发版后用户拿到旧引用
-    assert(
-      /location\s+=\s+\/index\.html[\s\S]*?Cache-Control[^;]*no-cache/i.test(nginx),
-      "index.html 缺 no-cache",
-    )
+  /** 服务端提供 SPA 回落与差异化缓存（原 nginx.conf 的职责） */
+  serverRouting() {
+    assert(exists("server/index.ts"), "缺少 server/index.ts")
+    const srv = read("server/index.ts")
+    assert(/\/api\/state/.test(srv), "服务端缺 /api/state 路由")
+    assert(/\/api\/health/.test(srv), "服务端缺 /api/health 路由")
+    assert(/max-age=31536000, immutable/.test(srv), "/assets/ 缺 immutable 长缓存")
+    assert(/no-cache, must-revalidate/.test(srv), "index.html 缺 no-cache")
+    assert(/startsWith\("\/api\/"\)/.test(srv), "未知 /api/ 路径不应回落到 HTML")
   },
 
   /** .dockerignore 排除构建无关目录 */
@@ -147,7 +151,7 @@ const cases = {
     assert(!/自托管字体/.test(md), "README 仍宣传自托管字体")
     assert(!/霞鹜文楷/.test(md), "README 仍提霞鹜文楷")
     assert(/docker build/i.test(md), "README 缺 docker build 说明")
-    assert(/nginx/i.test(md), "README 缺 nginx 说明")
+    assert(/数据卷|volume/i.test(md), "README 缺数据卷说明")
   },
 }
 

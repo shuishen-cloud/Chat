@@ -79,60 +79,69 @@ export function loadState(): ChatState {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) return EMPTY
-    const parsed = JSON.parse(raw) as Partial<ChatState>
-
-    const conversations = (parsed.conversations ?? []).map((c: Conversation) => ({
-      ...c,
-      messages: (c.messages ?? []).map((m: Message) => ({
-        ...m,
-        streaming: false,
-      })),
-    }))
-
-    const { conversations: convs, favorites } = migrateLegacyFavorites(
-      conversations,
-      parsed.favorites ?? []
-    )
-
-    // 丢弃指向已不存在消息的收藏
-    const valid = favorites.filter((f) => {
-      const conv = convs.find((c) => c.id === f.conversationId)
-      return !!conv?.messages.some((m) => m.id === f.messageId)
-    })
-
-    const boards: Board[] = parsed.boards ?? []
-    const { boardNodes, boardEdges, boardTasks } = gcBoardRefs(
-      convs,
-      boards,
-      parsed.boardNodes ?? [],
-      parsed.boardEdges ?? [],
-      parsed.boardTasks ?? []
-    )
-
-    return {
-      ...EMPTY,
-      ...parsed,
-      // 老数据没有该字段，按「开启」处理，保持既有行为
-      thinkingEnabled: parsed.thinkingEnabled !== false,
-      conversations: convs,
-      favorites: valid,
-      tags: parsed.tags ?? [],
-      projects: parsed.projects ?? [],
-      boards,
-      boardNodes,
-      boardEdges,
-      boardTasks,
-      activeTaskId: boardTasks.some((x) => x.id === parsed.activeTaskId)
-        ? (parsed.activeTaskId ?? null)
-        : null,
-      // 指向已删除画板/对话的视图状态需要回退
-      activeBoardId: boards.some((b) => b.id === parsed.activeBoardId)
-        ? (parsed.activeBoardId ?? null)
-        : null,
-      mainView: parsed.mainView === "board" ? "board" : "chat",
-    }
+    return normalizeLoaded(JSON.parse(raw) as Partial<ChatState>)
   } catch {
     return EMPTY
+  }
+}
+
+/**
+ * 把「来路不明的 ChatState 片段」清洗成可用的完整状态。
+ *
+ * 同时服务于两个入口：localStorage（可能来自旧版本）与服务端
+ * （可能是另一个设备写入的、字段更全或更旧的数据）。
+ * 清洗是幂等的，重复调用不会改变结果。
+ */
+export function normalizeLoaded(parsed: Partial<ChatState>): ChatState {
+  const conversations = (parsed.conversations ?? []).map((c: Conversation) => ({
+    ...c,
+    messages: (c.messages ?? []).map((m: Message) => ({
+      ...m,
+      streaming: false,
+    })),
+  }))
+
+  const { conversations: convs, favorites } = migrateLegacyFavorites(
+    conversations,
+    parsed.favorites ?? []
+  )
+
+  // 丢弃指向已不存在消息的收藏
+  const valid = favorites.filter((f) => {
+    const conv = convs.find((c) => c.id === f.conversationId)
+    return !!conv?.messages.some((m) => m.id === f.messageId)
+  })
+
+  const boards: Board[] = parsed.boards ?? []
+  const { boardNodes, boardEdges, boardTasks } = gcBoardRefs(
+    convs,
+    boards,
+    parsed.boardNodes ?? [],
+    parsed.boardEdges ?? [],
+    parsed.boardTasks ?? []
+  )
+
+  return {
+    ...EMPTY,
+    ...parsed,
+    // 老数据没有该字段，按「开启」处理，保持既有行为
+    thinkingEnabled: parsed.thinkingEnabled !== false,
+    conversations: convs,
+    favorites: valid,
+    tags: parsed.tags ?? [],
+    projects: parsed.projects ?? [],
+    boards,
+    boardNodes,
+    boardEdges,
+    boardTasks,
+    activeTaskId: boardTasks.some((x) => x.id === parsed.activeTaskId)
+      ? (parsed.activeTaskId ?? null)
+      : null,
+    // 指向已删除画板/对话的视图状态需要回退
+    activeBoardId: boards.some((b) => b.id === parsed.activeBoardId)
+      ? (parsed.activeBoardId ?? null)
+      : null,
+    mainView: parsed.mainView === "board" ? "board" : "chat",
   }
 }
 
@@ -210,6 +219,87 @@ export function saveState(state: ChatState): boolean {
     console.error("[shadcn-chat] 保存失败，本地存储可能已满", err)
     return false
   }
+}
+
+/* ------------------------------------------------------------------ *
+ * 服务端同步
+ *
+ * 定位：服务端是唯一权威副本，localStorage 只是缓存与离线兜底。
+ * 因此没有「合并」逻辑——拉到什么就是什么，拉不到就继续用本地。
+ * ------------------------------------------------------------------ */
+
+export interface RemoteState {
+  /** 服务端写入时刻，写入时必须原样带回，用于并发检测 */
+  updatedAt: number
+  /** null 表示服务端还没有数据 */
+  state: ChatState | null
+}
+
+export type PushResult =
+  | { ok: true; updatedAt: number }
+  | { ok: false; conflict: true; updatedAt: number }
+  | null
+
+/** 拉取服务端状态。网络或服务端异常一律返回 null，由调用方降级 */
+export async function fetchRemoteState(): Promise<RemoteState | null> {
+  try {
+    const res = await fetch("/api/state", { headers: { accept: "application/json" } })
+    if (!res.ok) return null
+    const data = (await res.json()) as Partial<RemoteState>
+    if (typeof data.updatedAt !== "number") return null
+    return {
+      updatedAt: data.updatedAt,
+      state: (data.state as ChatState | null) ?? null,
+    }
+  } catch {
+    return null
+  }
+}
+
+/**
+ * 推送整包状态。
+ *
+ * `base` 必须是上次成功同步拿到的 `updatedAt`：服务端据此判断
+ * 客户端是否基于最新副本，不匹配则返回 conflict，避免旧快照
+ * 覆盖掉其他设备刚写入的消息。
+ */
+export async function pushRemoteState(
+  state: ChatState,
+  base: number
+): Promise<PushResult> {
+  try {
+    const res = await fetch(`/api/state?base=${base}`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(state),
+    })
+    if (res.status === 409) {
+      const data = (await res.json().catch(() => ({}))) as { updatedAt?: number }
+      return {
+        ok: false,
+        conflict: true,
+        updatedAt: typeof data.updatedAt === "number" ? data.updatedAt : base,
+      }
+    }
+    if (!res.ok) return null
+    const data = (await res.json()) as { updatedAt?: number }
+    if (typeof data.updatedAt !== "number") return null
+    return { ok: true, updatedAt: data.updatedAt }
+  } catch {
+    return null
+  }
+}
+
+/**
+ * 是否该把当前状态推给服务端。
+ *
+ * 流式生成中不推：一方面会以 token 频率打满请求，
+ * 另一方面别的设备刷新后会看到半截回复。生成结束再统一推一次。
+ */
+export function hasStreamingMessage(state: ChatState): boolean {
+  return state.conversations.some((c) =>
+    c.messages.some((m) => m.streaming)
+  )
 }
 
 export function nextTitle(messages: Message[]): string {

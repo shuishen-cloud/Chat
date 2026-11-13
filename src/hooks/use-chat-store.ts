@@ -1,7 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { toast } from "sonner"
 import { streamChat } from "@/lib/deepseek"
-import { loadState, nextTitle, saveState, withBoardGc } from "@/lib/storage"
+import {
+  fetchRemoteState,
+  hasStreamingMessage,
+  loadState,
+  nextTitle,
+  normalizeLoaded,
+  pushRemoteState,
+  saveState,
+  withBoardGc,
+} from "@/lib/storage"
 import {
   LAYOUT_GAP,
   currentViewportCenter,
@@ -101,6 +110,64 @@ export function useChatStore() {
 
   // 持久化（防抖）。失败时提示一次，避免用户误以为已保存
   const saveFailedRef = useRef(false)
+
+  /**
+   * 服务端同步状态。
+   *
+   * - `remoteReady`：服务端副本是否已可用。**必须是 state**：用 ref 的话
+   *   它变 true 时不会触发推送 effect 重跑，同步就绪前发生的修改会永远
+   *   推不上去。
+   * - `remoteUpdatedAtRef`：上次成功同步的 updatedAt，作为 PUT 的 base
+   */
+  const [remoteReady, setRemoteReady] = useState(false)
+  const remoteUpdatedAtRef = useRef(0)
+  /** 已弹过「被其他设备更新」提示就不再重复打扰 */
+  const conflictNotifiedRef = useRef(false)
+
+  // 启动：拉服务端状态覆盖本地；服务端为空则用本地初始化
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      const remote = await fetchRemoteState()
+      if (cancelled) return
+
+      if (!remote) {
+        // 后端不可达：降级为纯本地，功能不受影响
+        return
+      }
+
+      if (remote.state === null) {
+        // 服务端空：把当前本地状态推上去作为初始副本
+        const first = await pushRemoteState(stateRef.current, 0)
+        if (cancelled) return
+        if (first && first.ok) {
+          remoteUpdatedAtRef.current = first.updatedAt
+          setRemoteReady(true)
+        }
+        return
+      }
+
+      remoteUpdatedAtRef.current = remote.updatedAt
+
+      /*
+       * 服务端有数据就以它为准（用户已确认本地历史可舍弃）。
+       * 直接整包替换，不做字段级合并。
+       */
+      const normalized = normalizeLoaded(remote.state)
+      setState((prev) => ({
+        ...normalized,
+        apiKey: normalized.apiKey || prev.apiKey,
+      }))
+      setRemoteReady(true)
+    })()
+
+    return () => {
+      cancelled = true
+    }
+    // 只在挂载时跑一次：之后由下面的保存 effect 负责推送
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   useEffect(() => {
     const t = setTimeout(() => {
       const ok = saveState(state)
@@ -116,6 +183,47 @@ export function useChatStore() {
     }, 200)
     return () => clearTimeout(t)
   }, [state])
+
+  /**
+   * 推送服务端（防抖 800ms）。
+   *
+   * 比本地保存更长的防抖：流式结束后会有一次状态变化，
+   * 加上 gc/迁移等连锁更新，缩短到这个间隔能合并成一次请求。
+   */
+  useEffect(() => {
+    if (!remoteReady) return
+    if (hasStreamingMessage(state)) return
+
+    const t = setTimeout(() => {
+      void (async () => {
+        const res = await pushRemoteState(state, remoteUpdatedAtRef.current)
+        if (!res) return
+
+        if (res.ok) {
+          remoteUpdatedAtRef.current = res.updatedAt
+          conflictNotifiedRef.current = false
+          return
+        }
+
+        // 409：其他设备已经写过，以服务端为准，本地改动让位
+        const latest = await fetchRemoteState()
+        if (latest?.state) {
+          remoteUpdatedAtRef.current = latest.updatedAt
+          setState((prev) => ({
+            ...normalizeLoaded(latest.state!),
+            apiKey: latest.state!.apiKey || prev.apiKey,
+          }))
+        } else {
+          remoteUpdatedAtRef.current = res.updatedAt
+        }
+        if (!conflictNotifiedRef.current) {
+          conflictNotifiedRef.current = true
+          toast.info("其他设备已更新，已同步最新内容", { duration: 5000 })
+        }
+      })()
+    }, 800)
+    return () => clearTimeout(t)
+  }, [state, remoteReady])
 
   // 首次进入：没有项目则建一个默认项目 + 默认会话
   useEffect(() => {

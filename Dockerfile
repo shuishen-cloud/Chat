@@ -15,15 +15,29 @@ ARG APP_BASE=/
 ENV APP_BASE=${APP_BASE}
 RUN npm run build
 
-# ---- 运行阶段：只保留静态产物，静态服务交给 nginx ----
-FROM nginx:1.27-alpine AS runtime
+# 运行阶段只留产物与服务端依赖，不要把 devDependencies 带进去
+RUN npm prune --omit=dev
 
-# 覆盖默认站点配置（含 SPA 回落、gzip、长缓存）
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+# ---- 运行阶段：一个 Node 进程同时提供 API 与静态产物 ----
+# 不再使用 nginx：状态存储需要一个活着的进程，nginx 只能发静态文件。
+# 单进程也省掉了一层反代配置，个人自用足够。
+FROM node:22-alpine AS runtime
 
-# dist 里只有 index.html + assets/，不带 node_modules 与源码
-COPY --from=builder /app/dist /usr/share/nginx/html
+WORKDIR /app
+ENV NODE_ENV=production
+# 容器内固定路径，再由 volume 挂到宿主机
+ENV STATE_FILE=/app/data/state.json
+ENV PORT=3000
 
-EXPOSE 80
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/server ./server
+COPY --from=builder /app/package.json ./
 
-# nginx 官方镜像默认前台启动，无需额外 CMD
+# 状态目录：必须挂卷，否则容器重建即丢全部对话
+VOLUME ["/app/data"]
+
+EXPOSE 3000
+
+# node 22 起可直接运行 TypeScript（类型剥离），无需构建步骤
+CMD ["node", "server/index.ts"]
