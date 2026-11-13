@@ -2,7 +2,7 @@
   "slug": "switch-primitive",
   "title": "思考模式开关改用 Base UI Switch 原语：修复关闭态不可辨识与滑块越界",
   "kind": "fix",
-  "status": "draft",
+  "status": "closed",
   "doc": "feat/switch-primitive.md",
   "api": [
     "Switch(props: SwitchPrimitive.Root.Props) -> JSX.Element"
@@ -34,14 +34,15 @@
     "74fe7d441859ec45bf690711e7a9867c39a19d1a",
     "e3030d6cb6063b07a370df7ca9f178097d564200",
     "ad4b975ca03baec7573394f8dcecc5cd4cf8069c",
-    "f89246d4afb8371cc28d50fb1efa0d5fa1b36ad3"
+    "f89246d4afb8371cc28d50fb1efa0d5fa1b36ad3",
+    "0f5b4f933e83a69c1d793ca821478e5bf7c13902"
   ],
   "notes": [],
   "discovered": [],
-  "stage": "fix",
+  "stage": "close",
   "reviews": {},
   "comments": {},
   "stage_reviews": {},
   "created_at": "2026-11-13T07:51:30.688508+00:00",
-  "updated_at": "2026-11-13T07:55:24.219073+00:00"
+  "updated_at": "2026-11-13T07:55:36.322705+00:00"
 }
