@@ -137,6 +137,152 @@ docker run -d --name shadcn-chat \
 | `index.html` no-cache | 发版后能拿到新资源引用 |
 | 原子写入 | 先写临时文件再 rename，进程被杀不会留下半截 JSON |
 
+### 部署注意事项
+
+真实部署前请逐条确认，这些都会导致「看起来能用但数据丢了」。
+
+#### 1. 数据卷不能省
+
+```bash
+# 错误：容器一重建，全部对话消失
+docker run -d -p 3000:3000 shadcn-chat:latest
+
+# 正确：挂命名卷
+docker run -d -p 3000:3000 -v shadcn-chat-data:/app/data shadcn-chat:latest
+```
+
+对话全部存在 `/app/data/state.json` 单个文件里。`docker rm` 不带 `-v`
+时命名卷会保留；但**换主机、换卷名 = 数据不会跟过来**。
+
+备份就是拷这个文件：
+
+```bash
+docker cp shadcn-chat:/app/data/state.json ./state-$(date +%F).json
+```
+
+恢复时把文件放回卷里即可。因为是整包覆盖写，备份文件可以直接当快照用。
+
+#### 2. 必须单实例，不能多副本
+
+`state.json` 是**整包读写**，没有文件锁。
+
+- ✅ `docker run` 一个容器
+- ❌ `--scale 3`、Kubernetes 多副本、多台机器共享同一个卷
+
+多副本会互相覆盖，表现为「刚存的对话过一会儿变回旧的」。
+免费额度够用的情况下，一个人用不到副本。
+
+#### 3. 反向代理要放行 PUT 与请求体
+
+`PUT /api/state` 的请求体是**整包状态**，会话多了会到几 MB。
+nginx 默认 `client_max_body_size 1m`，会直接 `413`：
+
+```nginx
+location /api/ {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+
+    # 整包状态可能较大，按实际数据量放宽
+    client_max_body_size 32m;
+
+    # PUT 必须放行
+    limit_except GET POST PUT { deny all; }
+}
+```
+
+用 Cloudflare / 其他 CDN 时注意它们也有请求体上限（免费版 100MB 通常够）。
+
+#### 4. 没有鉴权，务必自己加一层
+
+服务端**不校验任何凭据**——任何能访问到 `3000` 端口的人都能读写你的全部
+对话和 API Key。
+
+至少做其中一件：
+
+```bash
+# A. 只绑本机，靠 SSH 隧道访问（最省事）
+docker run -d -p 127.0.0.1:3000:3000 ...
+
+# B. nginx Basic Auth
+htpasswd -c /etc/nginx/.htpasswd yourname
+```
+
+```nginx
+location / {
+    auth_basic           "shadcn-chat";
+    auth_basic_user_file /etc/nginx/.htpasswd;
+    proxy_pass http://127.0.0.1:3000;
+}
+```
+
+**不要直接把 3000 端口暴露到公网。** 你的 DeepSeek API Key 就在
+`state.json` 里，泄露等于 Key 泄露。
+
+#### 5. HTTPS（不是必须，但强烈建议）
+
+API Key 会随状态在网络上传输，且浏览器直连 `api.deepseek.com` 需要
+HTTPS 页面才不会混内容拦截。用 Caddy 最省事：
+
+```
+chat.example.com {
+    basicauth {
+        yourname $2a$14$...
+    }
+    reverse_proxy 127.0.0.1:3000
+}
+```
+
+#### 6. 多端并发写的预期行为
+
+同一时刻两端都改：
+
+- 后写的一方收到 `409`，**不会**覆盖先写的数据
+- 收到 409 的端会拉取服务端最新内容覆盖本地，并弹「其他设备已更新」提示
+- 代价是**那一端本次未落库的修改会丢失**（已确认这个取舍可接受）
+
+典型场景：手机和电脑都开着，你在电脑发消息后 30 秒内又在手机改标题 →
+手机那次修改可能被丢弃。刷新后重做即可。
+
+#### 7. 流式生成期间不落库
+
+正在流式输出时不会推送服务端（避免 token 级请求与半截回复）。
+**生成结束后才写一次。** 所以另一端在生成过程中刷新，看不到这条回复，
+生成完成后再刷新就有了。
+
+#### 8. 首次启动会覆盖本地数据
+
+服务端有数据时，前端启动会**整包替换**本地 `localStorage`，不做合并。
+这是刻意设计（服务端为唯一真相）。
+
+后果：**如果服务端被清空（换了空卷），各端再打开会用自己的本地数据
+重新初始化服务端**——哪台先打开，就以哪台为准。
+
+#### 9. 健康检查
+
+```bash
+curl -f http://127.0.0.1:3000/api/health   # {"ok":true}
+```
+
+Docker healthcheck 示例：
+
+```bash
+--health-cmd "wget -qO- http://127.0.0.1:3000/api/health || exit 1" \
+--health-interval 30s --health-retries 3
+```
+
+#### 10. 升级
+
+```bash
+docker build -t shadcn-chat:latest .
+docker rm -f shadcn-chat
+docker run -d --name shadcn-chat -p 3000:3000 \
+  -v shadcn-chat-data:/app/data --restart unless-stopped shadcn-chat:latest
+```
+
+`state.json` 结构跨版本兼容（服务端只当不透明 JSON 存取），
+升级不需要迁移脚本。但**降级前先备份**。
+
 ### 已有 nginx
 
 若坚持用 nginx 发静态产物，需要把 `/api/` 反代到上面的 Node 进程，

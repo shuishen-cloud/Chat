@@ -54,9 +54,14 @@ async function waitHealth(timeout = 20000) {
   throw new Error(`服务端 ${timeout}ms 内未就绪（${BASE}/api/health）`)
 }
 
-async function startServer() {
-  // 每次从头开始，避免上一次残留影响 base 断言
-  fs.rmSync(STATE_FILE, { force: true })
+/**
+ * 起服务端。
+ *
+ * 默认清空状态文件，保证每个用例从「服务端为空」开始；
+ * `keepFile=true` 用于重启场景——否则「重启后数据还在」必然失败。
+ */
+async function startServer(keepFile = false) {
+  if (!keepFile) fs.rmSync(STATE_FILE, { force: true })
 
   proc = spawn(process.execPath, ["server/index.ts"], {
     cwd: ROOT,
@@ -74,12 +79,27 @@ async function startServer() {
   return logs
 }
 
-function stopServer() {
-  if (proc) {
-    proc.kill("SIGTERM")
-    proc = null
+/**
+ * 停服务端并**等到端口真正释放**。
+ *
+ * 只 kill 不等的话，紧接着 spawn 新进程会 EADDRINUSE，
+ * 而旧进程仍占着端口应答请求——测试会读到旧进程的状态。
+ *
+ * `keepFile=true` 用于「重启后数据还在」这类断言：
+ * 默认清空是为了让每个用例从干净状态开始。
+ */
+async function stopServer(keepFile = false) {
+  const p = proc
+  proc = null
+  if (p) {
+    await new Promise((resolve) => {
+      const done = () => resolve()
+      p.once("exit", done)
+      p.kill("SIGTERM")
+      setTimeout(done, 3000)
+    })
   }
-  if (!process.env.KEEP) fs.rmSync(STATE_FILE, { force: true })
+  if (!keepFile && !process.env.KEEP) fs.rmSync(STATE_FILE, { force: true })
 }
 
 /* ------------------------------------------------------------------ */
@@ -205,7 +225,9 @@ const cases = {
 
   /** 落盘是原子的：文件内容始终是完整 JSON（能解析且含 updatedAt/state） */
   async serverPersist() {
-    const w = await putState(tinyState("持久化"), 0)
+    // 前面 serverPut 已写过数据，必须基于当前 updatedAt 才能写入
+    const cur = await getState()
+    const w = await putState(tinyState("持久化"), cur.updatedAt)
     assert(w.status === 200, `PUT 失败 ${w.status}`)
 
     assert(fs.existsSync(STATE_FILE), `state 文件不存在: ${STATE_FILE}`)
@@ -215,16 +237,16 @@ const cases = {
     assert(parsed.state && typeof parsed.state === "object", "落盘缺 state")
 
     // 重启进程：数据必须还在（这是「部署到服务器」的核心承诺）
-    stopServer()
-    await startServer()
+    await stopServer(true)
+    await startServer(true)
     const again = await getState()
     assert(again.state.projects[0].name === "持久化", "重启后数据丢失")
   },
 
   /** 静态产物与 SPA 回落可用（服务端同时承担 nginx 的职责） */
   async serverStatic() {
-    const idx = await fetch(`${BASE}/`)
-    assert(idx.ok, `GET / 状态码 ${idx.status}`)
+    const idx = await fetch(`${BASE}/index.html`)
+    assert(idx.ok, `GET /index.html 状态码 ${idx.status}`)
     const html = await idx.text()
     assert(html.includes("<div id=\"root\">"), "根路径未返回 index.html")
     assert(
@@ -258,7 +280,7 @@ function browserCases() {
       const browser = await chromium.launch({ channel: "chromium" })
       try {
         // 服务端先清空，让 A 走「初始化」路径
-        stopServer()
+        await stopServer()
         await startServer()
 
         const ctxA = await browser.newContext()
@@ -280,10 +302,34 @@ function browserCases() {
         )
         assert(bHasProject, "设备 B 未显示设备 A 的项目")
 
-        // B 新建会话 → 落库
-        await b.locator("aside").first().getByRole("button", { name: /新建/ }).first().click()
-        const before = (await getState()).updatedAt
-        const written = await until(async () => (await getState()).updatedAt !== before)
+        /*
+         * 等 B 真正完成「拉服务端 → 覆盖本地」。
+         * 若在就绪前就操作，随后的覆盖会把这次操作抹掉。
+         */
+        const serverBefore = (await getState()).state
+        const bSynced = await until(async () => {
+          const local = await b.evaluate(() =>
+            JSON.parse(localStorage.getItem("shadcn-chat/state/v1") || "{}")
+          )
+          return (
+            (local.conversations?.length ?? -1) === serverBefore.conversations.length &&
+            local.conversations?.[0]?.id === serverBefore.conversations[0]?.id
+          )
+        }, 10000)
+        assert(bSynced, "设备 B 未完成与服务端的同步")
+        /*
+         * 同步完成后状态还要经 200ms 本地保存 + 一次渲染才稳定，
+         * 立刻点击有概率落在「覆盖仍在进行」的窗口里被抹掉。
+         */
+        await b.waitForTimeout(600)
+
+        // B 新建会话 → 落库（推送有 800ms 防抖，故用会话数而非 updatedAt 判断）
+        const serverConvsBefore = (await getState()).state.conversations.length
+        await clickNewConversation(b)
+        const written = await until(
+          async () => (await getState()).state.conversations.length > serverConvsBefore,
+          10000
+        )
         assert(written, "设备 B 的修改未推送到服务端")
 
         // A 刷新 → 看到 B 的修改
@@ -325,7 +371,7 @@ function browserCases() {
         assert(aside.includes("我的项目"), "后端不可达时未降级到本地初始状态")
 
         // 本地仍能写入
-        await page.locator("aside").first().getByRole("button", { name: /新建/ }).first().click()
+        await clickNewConversation(page)
         const n = await until(async () => {
           const local = await page.evaluate(() =>
             JSON.parse(localStorage.getItem("shadcn-chat/state/v1") || "{}")
@@ -340,14 +386,106 @@ function browserCases() {
       }
     },
 
-    /** 流式生成期间不产生 PUT，结束后产生一次 */
+    /**
+     * 本地状态被服务端覆盖时，不能把「覆盖前的旧快照」推回去。
+     *
+     * 回归用例：同步完成会用服务端数据整包替换本地，随后推送 effect
+     * 因 state 变化再次触发。若 base 没跟上，就会把刚拉到的服务端数据
+     * 又写回去一遍（或触发 409 循环）。
+     */
+    async syncNoStalePushBack() {
+      const browser = await chromium.launch({ channel: "chromium" })
+      try {
+        await stopServer()
+        await startServer()
+
+        // 服务端先有 2 条会话
+        const seed = tinyState("种子项目")
+        seed.conversations = [
+          seed.conversations[0],
+          { ...seed.conversations[0], id: "c2", title: "第二条" },
+        ]
+        const w = await putState(seed, 0)
+        assert(w.status === 200, `种子写入失败 ${w.status}`)
+
+        const ctx = await browser.newContext()
+        const page = await ctx.newPage()
+        await page.goto(BASE, { waitUntil: "domcontentloaded" })
+
+        // 等本端拿到服务端的 2 条
+        const synced = await until(async () => {
+          const local = await page.evaluate(() =>
+            JSON.parse(localStorage.getItem("shadcn-chat/state/v1") || "{}")
+          )
+          return local.conversations?.length === 2
+        }, 10000)
+        assert(synced, "未同步到服务端的 2 条会话")
+
+        // 再等所有在途推送落地，服务端不应被反写成别的内容
+        await page.waitForTimeout(2500)
+        const after = await getState()
+        assert(
+          after.state.conversations.length === 2,
+          `服务端会话数被改坏了（期望 2，实际 ${after.state.conversations.length}）`
+        )
+        assert(
+          after.state.conversations.map((c) => c.id).join(",") === "c1,c2",
+          "服务端会话被本地旧快照覆盖"
+        )
+
+        await ctx.close()
+      } finally {
+        await browser.close()
+      }
+    },
+
+    
     async syncNoStreamingPush() {
       const browser = await chromium.launch({ channel: "chromium" })
       try {
-        stopServer()
+        await stopServer()
         await startServer()
 
         const ctx = await browser.newContext()
+        /*
+         * 没有 API Key 时 send() 会直接报错、根本不发起请求。
+         * 在导航前种一份带 key 的本地状态，服务端为空时会以它初始化。
+         */
+        await ctx.addInitScript(() => {
+          const now = Date.now()
+          localStorage.setItem(
+            "shadcn-chat/state/v1",
+            JSON.stringify({
+              projects: [{ id: "p1", name: "流式项目", createdAt: now }],
+              conversations: [
+                {
+                  id: "c1",
+                  projectId: "p1",
+                  title: "流式会话",
+                  createdAt: now,
+                  updatedAt: now,
+                  messages: [],
+                },
+              ],
+              favorites: [],
+              tags: [],
+              boards: [],
+              boardNodes: [],
+              boardEdges: [],
+              boardTasks: [],
+              activeProjectId: "p1",
+              activeConversationId: "c1",
+              activeBoardId: null,
+              activeTaskId: null,
+              mainView: "chat",
+              apiKey: "sk-test",
+              baseUrl: "https://api.deepseek.com",
+              model: "deepseek-v4-pro",
+              thinkingEnabled: false,
+              sidebarView: "list",
+            })
+          )
+        })
         const page = await ctx.newPage()
 
         const puts = []
@@ -402,6 +540,37 @@ function browserCases() {
   }
 }
 
+/**
+ * 点侧边栏「新建对话」。
+ *
+ * 该按钮只有 Tooltip 没有 aria-label，无法按名字定位；
+ * 它固定在侧边栏头部最后一个图标按钮的位置。
+ */
+async function clickNewConversation(page) {
+  const convCount = () =>
+    page.evaluate(
+      () =>
+        JSON.parse(localStorage.getItem("shadcn-chat/state/v1") || "{}")
+          .conversations?.length ?? 0
+    )
+
+  const before = await convCount()
+  /*
+   * 侧边栏头部有两个 tooltip 图标按钮：「新建对话」在前、「新建项目」在后。
+   * 它们只有 Tooltip 文案、没有 aria-label，因此按 DOM 顺序取
+   * tooltip-trigger 的第一个。
+   */
+  await page
+    .locator("aside")
+    .first()
+    .locator('button[data-slot="tooltip-trigger"]')
+    .first()
+    .click()
+
+  const ok = await until(async () => (await convCount()) > before, 5000)
+  assert(ok, "点击「新建对话」后会话数未增加")
+}
+
 /** 轮询等待，避免固定 sleep */
 async function until(fn, timeout = 8000) {
   const start = Date.now()
@@ -423,7 +592,7 @@ async function until(fn, timeout = 8000) {
 async function main() {
   const only = process.env.CASE
   if (only === "--list") {
-    console.log([...Object.keys(cases), "syncTwoDevices", "syncOfflineFallback", "syncNoStreamingPush"].join("\n"))
+    console.log([...Object.keys(cases), "syncTwoDevices", "syncOfflineFallback", "syncNoStalePushBack", "syncNoStreamingPush"].join("\n"))
     return
   }
 
@@ -454,7 +623,7 @@ async function main() {
     }
   }
 
-  stopServer()
+  await stopServer()
 
   const total = only ? passed + failed.length : Object.keys(all).length
   console.log(`\n${passed}/${total} 通过`)
@@ -467,12 +636,11 @@ async function main() {
 }
 
 process.on("SIGINT", () => {
-  stopServer()
-  process.exit(130)
+  void stopServer().then(() => process.exit(130))
 })
 
-main().catch((e) => {
+main().catch(async (e) => {
   console.error(e)
-  stopServer()
+  await stopServer()
   process.exit(1)
 })

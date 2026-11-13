@@ -240,8 +240,23 @@ export type PushResult =
   | { ok: false; conflict: true; updatedAt: number }
   | null
 
+/**
+ * 当前构建是否启用了服务端同步。
+ *
+ * 生产构建始终启用；dev 下默认关闭，因为开发时通常没有后端，
+ * 而请求会拿到 Vite 的 SPA 回落（HTML），`res.json()` 解析失败
+ * 虽然会被 catch，但浏览器仍会记一条 console error——
+ * 既有 Playwright 用例断言「控制台无错误」，会被这条噪声打挂。
+ *
+ * 本地联调多端时：`node server/index.ts` + `VITE_API_PROXY=... npm run dev`，
+ * 此时 vite 会把 /api 代理到真后端，开关随之打开（由 vite.config.ts 的
+ * define 注入 `__REMOTE_SYNC__`）。
+ */
+const REMOTE_SYNC_ENABLED = __REMOTE_SYNC__ === "1"
+
 /** 拉取服务端状态。网络或服务端异常一律返回 null，由调用方降级 */
 export async function fetchRemoteState(): Promise<RemoteState | null> {
+  if (!REMOTE_SYNC_ENABLED) return null
   try {
     const res = await fetch("/api/state", { headers: { accept: "application/json" } })
     if (!res.ok) return null
@@ -267,6 +282,7 @@ export async function pushRemoteState(
   state: ChatState,
   base: number
 ): Promise<PushResult> {
+  if (!REMOTE_SYNC_ENABLED) return null
   try {
     const res = await fetch(`/api/state?base=${base}`, {
       method: "PUT",

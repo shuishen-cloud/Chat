@@ -108,9 +108,6 @@ export function useChatStore() {
   const abortRef = useRef<AbortController | null>(null)
   const [streamingConvId, setStreamingConvId] = useState<string | null>(null)
 
-  // 持久化（防抖）。失败时提示一次，避免用户误以为已保存
-  const saveFailedRef = useRef(false)
-
   /**
    * 服务端同步状态。
    *
@@ -123,6 +120,9 @@ export function useChatStore() {
   const remoteUpdatedAtRef = useRef(0)
   /** 已弹过「被其他设备更新」提示就不再重复打扰 */
   const conflictNotifiedRef = useRef(false)
+
+  // 持久化（防抖）。失败时提示一次，避免用户误以为已保存
+  const saveFailedRef = useRef(false)
 
   // 启动：拉服务端状态覆盖本地；服务端为空则用本地初始化
   useEffect(() => {
@@ -150,8 +150,12 @@ export function useChatStore() {
       remoteUpdatedAtRef.current = remote.updatedAt
 
       /*
-       * 服务端有数据就以它为准（用户已确认本地历史可舍弃）。
-       * 直接整包替换，不做字段级合并。
+       * 服务端有数据就以它为准（用户已确认本地历史可舍弃），整包替换、不做合并。
+       *
+       * 注意这里**不能**让「就绪前的本地变更」优先：启动时会自动建一个
+       * 默认项目（见下方 initDefault），若把它当成用户操作推上去，就会用
+       * 空库覆盖掉服务端的真实数据。详见 fix 阶段的回归用例
+       * syncNoStalePushBack。
        */
       const normalized = normalizeLoaded(remote.state)
       setState((prev) => ({
