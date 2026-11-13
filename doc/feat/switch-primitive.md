@@ -180,3 +180,15 @@ npm run build       # ✓ built
 node scripts/test-switch-primitive.cjs   # 6/6
 CASE=thinkingToggle node scripts/test-board.cjs   # 1/1（原有回归未破）
 ```
+
+## 收尾
+
+思考模式开关已换为 Base UI 原语封装，两个真实缺陷（滑块越界、点文字无效）由测试守住，
+浅色/暗色两套主题均验证通过，原有 `thinkingToggle` 请求体行为未变。
+
+遗留观察项（不阻塞）：
+
+- `trackAndThumbContrast` 在旧实现下即为绿，作为规范守卫保留而非 bug 检测器，
+  后续若调整主题变量，需重新校准其亮度阈值（当前 `lumaGap ≥ 20`、`trackVsSurface ≥ 12`）。
+- 暗色下「亮轨道表达开启」与浅色「深轨道表达开启」方向相反，沿用 shadcn 官方行为；
+  如需统一方向，加 `dark:data-[checked]:bg-*` 覆盖轨道色并在本文件记录新决策。
