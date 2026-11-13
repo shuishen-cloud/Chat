@@ -2,7 +2,7 @@
   "slug": "touch-native-control-clip",
   "title": "平板浏览器原生控件遮挡自绘勾选框：压制 Base UI 幽灵 input 的系统绘制",
   "kind": "fix",
-  "status": "draft",
+  "status": "closed",
   "doc": "feat/touch-native-control-clip.md",
   "api": [
     "无：Checkbox 组件 props 未变，仍为 CheckboxPrimitive.Root.Props"
@@ -35,14 +35,15 @@
     "e0489be336a1ca7d52af7ae9866a811c72fdb7d6",
     "c27248c54516adb45df82fad1a81c2a63fd8dd20",
     "08c22eeefc08c0e01b7048dce5a75146b26c7c7b",
-    "204a74a5928285d3f9ebf465b83ba90529ced8fa"
+    "204a74a5928285d3f9ebf465b83ba90529ced8fa",
+    "52227bbb5c3aff09eda3842850902c3287462c62"
   ],
   "notes": [],
   "discovered": [],
-  "stage": "fix",
+  "stage": "close",
   "reviews": {},
   "comments": {},
   "stage_reviews": {},
   "created_at": "2026-11-13T07:16:29.454395+00:00",
-  "updated_at": "2026-11-13T07:17:18.703093+00:00"
+  "updated_at": "2026-11-13T07:17:33.734826+00:00"
 }
