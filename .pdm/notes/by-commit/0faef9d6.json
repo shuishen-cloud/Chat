@@ -1,0 +1,39 @@
+{
+  "commit": "0faef9d6",
+  "notes": [
+    {
+      "commit": "0faef9d6",
+      "kind": "difficulty",
+      "title": "Node 直接跑 TS 的版本门槛与 Docker 镜像对齐",
+      "detail": "服务端用 node:22-alpine 直接执行 server/index.ts（类型剥离，无需 tsc）。要求 Node >=22.6 且 .ts 里 import 必须带扩展名（./store.ts），否则 ESM 解析失败。本机是 Node 26 所以本地验证不会暴露这个门槛，镜像里显式固定 node:22-alpine 才保证一致。",
+      "author": "human:unknown",
+      "files": [
+        "server/index.ts"
+      ],
+      "severity": "medium",
+      "status": "noted",
+      "catches": [],
+      "verifications": [
+        {
+          "kind": "command",
+          "target": "",
+          "command": "node --version && node server/index.ts",
+          "method": "",
+          "script": "",
+          "expected": "listening on",
+          "note": "",
+          "cwd": "",
+          "last_run_at": null,
+          "last_status": "unknown",
+          "last_output": ""
+        }
+      ],
+      "issue_id": null,
+      "resolves": [],
+      "tags": [
+        "server"
+      ],
+      "created_at": "2026-11-13T13:04:50.716925+00:00"
+    }
+  ]
+}

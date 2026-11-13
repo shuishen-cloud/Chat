@@ -1,18 +1,19 @@
 {
-  "count": 37,
+  "count": 41,
   "by_kind": {
-    "difficulty": 9,
+    "difficulty": 11,
     "problem": 4,
-    "pitfall": 18,
+    "pitfall": 19,
     "controlled-exception": 3,
-    "bug": 3
+    "bug": 4
   },
   "by_status": {
-    "noted": 37
+    "noted": 41
   },
   "by_issue": {},
   "commits": [
     "0541122a",
+    "0faef9d6",
     "1b328261",
     "2acae31f",
     "34d71c5f",
@@ -27,6 +28,7 @@
     "ad4b975ca03baec7573394f8dcecc5cd4cf8069c",
     "d88db27f",
     "e920562b",
+    "ee0b9367",
     "f89246d4afb8371cc28d50fb1efa0d5fa1b36ad3",
     "f9471b78",
     "faf2547a"

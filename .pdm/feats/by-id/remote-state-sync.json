@@ -1,0 +1,54 @@
+{
+  "slug": "remote-state-sync",
+  "title": "会话历史存服务端：多端刷新可见同一份对话",
+  "kind": "feat",
+  "status": "closed",
+  "doc": "feat/remote-state-sync.md",
+  "api": [
+    "GET /api/state -> {updatedAt:number, state:ChatState|null}",
+    "PUT /api/state?base=<updatedAt> (body: ChatState) -> {updatedAt:number} | 409 {updatedAt:number} | 400",
+    "fetchRemoteState() -> Promise<{updatedAt:number, state:ChatState|null} | null>",
+    "pushRemoteState(state:ChatState, base:number) -> Promise<{ok:true,updatedAt:number} | {ok:false,conflict:true,updatedAt:number} | null>"
+  ],
+  "logs": [
+    "服务端每次 PUT 打印 updatedAt 与字节数；读取失败打印错误"
+  ],
+  "fallbacks": [
+    "GET 失败静默用 localStorage；PUT 失败静默重试；409 拉服务端覆盖本地并 toast；文件损坏按服务端为空处理"
+  ],
+  "design_note": "纯前端 localStorage 导致多端各自一份数据。用户接受舍弃本地历史、服务端为唯一真相，因此不需要合并逻辑与多用户，只需整包 JSON 落盘 + 刷新拉取。并发写用 updatedAt 做 base 校验而非版本号，409 时以服务端为准，成本最低且能防丢消息。",
+  "impl_note": "新增 server/（Hono + node:fs 原子写 data/state.json）；前端 storage.ts 增 fetchRemoteState/pushRemoteState，use-chat-store 在启动拉取、状态变化时防抖 800ms 推送，流式期间跳过；Dockerfile 改 Node 单容器 + data 卷。",
+  "data_model": [
+    "data/state.json: {updatedAt:number, state:ChatState} —— 服务端唯一副本，updatedAt 仅用于并发检测"
+  ],
+  "samples": [
+    "{\"updatedAt\":1763000000000,\"state\":{\"projects\":[],\"conversations\":[]}}"
+  ],
+  "changes": [
+    "server/index.ts —— Hono 服务：GET/PUT /api/state、/api/health、serve dist",
+    "server/store.ts —— 原子读写 state.json",
+    "src/lib/storage.ts —— 新增 fetchRemoteState/pushRemoteState",
+    "src/hooks/use-chat-store.ts —— 启动拉取 + 防抖推送 + 409 覆盖",
+    "Dockerfile —— 改 Node 单容器，挂载 /app/data"
+  ],
+  "test_note": "Playwright 双 context 模拟两端：A 新建会话落库后 B 打开可见；B 再建会话 A 刷新可见；直接 fetch 用旧 base PUT 断言 409 且数据不变；流式期间无 PUT 请求；后端不可达时页面仍可用",
+  "debug_note": "",
+  "extend_note": "",
+  "impact": "storage.ts 新增两个导出函数，loadState/saveState 签名不变；use-chat-store 增加启动拉取与推送 effect；部署形态从 nginx 单容器变为 Node 单容器，nginx.conf 退役",
+  "importance": "high",
+  "commits": [
+    "d823eea832ef76b8c0e439eeb3c04b238cfc9b4b",
+    "4ce6c168cbe6c74308c10d571b5584abfaba6a19",
+    "0faef9d6585ecd6ece22dbc7e57a14b5d0c9230c",
+    "ee0b9367b75dbd27f0d88e4a5de65cac48a65d4b",
+    "0520f186e3e8f97c07348dc0bd80f800bad490c4"
+  ],
+  "notes": [],
+  "discovered": [],
+  "stage": "close",
+  "reviews": {},
+  "comments": {},
+  "stage_reviews": {},
+  "created_at": "2026-11-13T12:38:57.243650+00:00",
+  "updated_at": "2026-11-13T13:04:46.448720+00:00"
+}
