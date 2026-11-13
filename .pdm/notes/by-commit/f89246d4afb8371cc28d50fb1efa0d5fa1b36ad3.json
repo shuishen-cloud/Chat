@@ -1,0 +1,73 @@
+{
+  "commit": "f89246d4afb8371cc28d50fb1efa0d5fa1b36ad3",
+  "notes": [
+    {
+      "commit": "f89246d4afb8371cc28d50fb1efa0d5fa1b36ad3",
+      "kind": "difficulty",
+      "title": "transition-colors 会让测试读到过渡中间态，切主题后立刻读颜色会得到假失败",
+      "detail": "暗色用例切到 .dark 后立刻 getComputedStyle 读 backgroundColor，轨道带有 transition-colors，读数落在动画中间帧，轨道与滑块一度完全相同（亮度差 0.0），表现为假失败。加 waitForTimeout(400) 等过渡结束后恢复正常。凡断言颜色/位置前，都要先让 CSS 过渡收敛。",
+      "author": "human:unknown",
+      "files": [
+        "scripts/test-switch-primitive.cjs"
+      ],
+      "severity": "medium",
+      "status": "noted",
+      "catches": [],
+      "verifications": [
+        {
+          "kind": "test",
+          "target": "scripts/test-switch-primitive.cjs::darkThemeUsable",
+          "command": "",
+          "method": "",
+          "script": "",
+          "expected": "passed",
+          "note": "",
+          "cwd": "",
+          "last_run_at": null,
+          "last_status": "unknown",
+          "last_output": ""
+        }
+      ],
+      "issue_id": null,
+      "resolves": [],
+      "tags": [
+        "test"
+      ],
+      "created_at": "2026-11-13T07:55:28.924443+00:00"
+    },
+    {
+      "commit": "f89246d4afb8371cc28d50fb1efa0d5fa1b36ad3",
+      "kind": "pitfall",
+      "title": "canvas 的 fillStyle 对不支持的 CSS 颜色语法静默失败，会沿用上一次的值",
+      "detail": "把 oklch()/oklab() 颜色喂给 canvas 转 RGB 时，若语法不被接受，fillStyle 赋值不抛错而是保留旧值，导致两种不同颜色都被读成同一个数。修法是每次新建 canvas，先设哨兵色（如 #ff00ee），赋目标色后校验 fillStyle 是否仍为哨兵，是则说明未被接受。",
+      "author": "human:unknown",
+      "files": [
+        "scripts/test-switch-primitive.cjs"
+      ],
+      "severity": "medium",
+      "status": "noted",
+      "catches": [],
+      "verifications": [
+        {
+          "kind": "test",
+          "target": "scripts/test-switch-primitive.cjs::trackAndThumbContrast",
+          "command": "",
+          "method": "",
+          "script": "",
+          "expected": "passed",
+          "note": "",
+          "cwd": "",
+          "last_run_at": null,
+          "last_status": "unknown",
+          "last_output": ""
+        }
+      ],
+      "issue_id": null,
+      "resolves": [],
+      "tags": [
+        "test"
+      ],
+      "created_at": "2026-11-13T07:55:28.986206+00:00"
+    }
+  ]
+}
