@@ -1,14 +1,14 @@
 {
-  "count": 33,
+  "count": 35,
   "by_kind": {
     "difficulty": 8,
     "problem": 4,
-    "pitfall": 15,
+    "pitfall": 17,
     "controlled-exception": 3,
     "bug": 3
   },
   "by_status": {
-    "noted": 33
+    "noted": 35
   },
   "by_issue": {},
   "commits": [
@@ -24,6 +24,7 @@
     "9256727d",
     "94cf2202",
     "a1ee5914",
+    "ad4b975ca03baec7573394f8dcecc5cd4cf8069c",
     "d88db27f",
     "e920562b",
     "f9471b78",

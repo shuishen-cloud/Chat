@@ -1,0 +1,73 @@
+{
+  "commit": "ad4b975ca03baec7573394f8dcecc5cd4cf8069c",
+  "notes": [
+    {
+      "commit": "ad4b975ca03baec7573394f8dcecc5cd4cf8069c",
+      "kind": "pitfall",
+      "title": "底座 @base-ui/react 已有 switch 原语，缺组件时应先查 node_modules 再补封装，而非手写",
+      "detail": "settings-dialog 里思考模式开关是手写 button+span（提交 e920562）。手写态漏掉 focus-visible 焦点环、disabled 态、隐藏 input 与暗色适配；且 bg-muted 轨道配 bg-background 滑块在浅色主题下几乎同色，滑块隐形。@base-ui/react 实际导出 60+ 组件（switch/slider/progress/tabs/tooltip 等），项目只用了个零头。",
+      "author": "human:unknown",
+      "files": [
+        "src/components/ui/switch.tsx"
+      ],
+      "severity": "high",
+      "status": "noted",
+      "catches": [],
+      "verifications": [
+        {
+          "kind": "test",
+          "target": "scripts/test-switch-primitive.cjs",
+          "command": "",
+          "method": "APP_URL=http://127.0.0.1:5199/ node scripts/test-switch-primitive.cjs",
+          "script": "",
+          "expected": "5/5 passed",
+          "note": "",
+          "cwd": "",
+          "last_run_at": null,
+          "last_status": "unknown",
+          "last_output": ""
+        }
+      ],
+      "issue_id": null,
+      "resolves": [],
+      "tags": [
+        "ui"
+      ],
+      "created_at": "2026-11-13T07:53:53.582060+00:00"
+    },
+    {
+      "commit": "ad4b975ca03baec7573394f8dcecc5cd4cf8069c",
+      "kind": "pitfall",
+      "title": "Base UI 的选中态属性是 data-checked，不是 Radix 的 data-[state=checked]",
+      "detail": "直接套 shadcn 旧 Radix 模板写 data-[state=checked]:bg-primary 会整段样式失效，开关永远停在关闭态外观。属性名以 node_modules/@base-ui/react/<comp>/<part>DataAttributes.js 为准确认（switch 导出 checked = 'data-checked'）。",
+      "author": "human:unknown",
+      "files": [
+        "src/components/ui/switch.tsx"
+      ],
+      "severity": "high",
+      "status": "noted",
+      "catches": [],
+      "verifications": [
+        {
+          "kind": "command",
+          "target": "",
+          "command": "node -e \"const {checked}=require('@base-ui/react/switch/root/SwitchRootDataAttributes.js')",
+          "method": "",
+          "script": "",
+          "expected": "data-checked",
+          "note": "",
+          "cwd": "",
+          "last_run_at": null,
+          "last_status": "unknown",
+          "last_output": ""
+        }
+      ],
+      "issue_id": null,
+      "resolves": [],
+      "tags": [
+        "ui"
+      ],
+      "created_at": "2026-11-13T07:53:55.325004+00:00"
+    }
+  ]
+}

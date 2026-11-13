@@ -1,0 +1,47 @@
+{
+  "slug": "switch-primitive",
+  "title": "思考模式开关改用 Base UI Switch 原语：修复关闭态不可辨识与滑块越界",
+  "kind": "fix",
+  "status": "draft",
+  "doc": "feat/switch-primitive.md",
+  "api": [
+    "Switch(props: SwitchPrimitive.Root.Props) -> JSX.Element"
+  ],
+  "logs": [
+    "无：纯 UI 组件，不产生日志"
+  ],
+  "fallbacks": [
+    "无：受控组件，状态由父级 thinking 掌握，无外部数据"
+  ],
+  "design_note": "开关此前是手写 button+span（提交 e920562），项目 ui/ 目录从未封装 switch。手写态用 bg-muted 轨道 + bg-background 滑块，浅色主题下两者都接近白色，滑块与轨道同时隐形，仅剩一团黑色轮廓；位移量 translate-x-4.5（18px）在 36px 轨道 / 16px 滑块下把滑块推出右边界。底座 @base-ui/react 已内置 switch 原语，按 shadcn 约定补一层薄封装即可，无需自造。",
+  "impl_note": "新增 src/components/ui/switch.tsx，封装 @base-ui/react/switch 的 Root+Thumb：轨道 bg-input → data-[checked]:bg-primary，滑块 translate-x-0.5 → data-[checked]:translate-x-4，补 focus-visible 焦点环与 disabled 态，暗色主题滑块用 primary-foreground。settings-dialog 改为 <Switch checked onCheckedChange>，并加 htmlFor/id 让文字可点击切换（Base UI 会自动生成 aria-labelledby），移除因此不再使用的 cn 导入。",
+  "data_model": [
+    "switch.tsx::Switch(props: SwitchPrimitive.Root.Props) —— 薄封装，无自有状态"
+  ],
+  "samples": [
+    "{\"checked\":true,\"track\":\"bg-primary\",\"thumb\":\"translate-x-4\"}"
+  ],
+  "changes": [
+    "src/components/settings-dialog.tsx::思考模式行 —— 手写 role=switch 的 button+span 替换为 <Switch>",
+    "src/components/ui/switch.tsx::Switch —— 新增文件"
+  ],
+  "test_note": "Playwright：打开设置弹窗，断言 [data-slot=switch] 存在、aria-checked 在点击开关与点击文字后各翻转一次；截图比对开启/关闭两态轨道与滑块可见",
+  "debug_note": "",
+  "extend_note": "",
+  "impact": "仅设置弹窗内思考模式一行；对外无 API 变化，localStorage 字段 thinkingEnabled 不变",
+  "importance": "high",
+  "commits": [
+    "74fe7d441859ec45bf690711e7a9867c39a19d1a",
+    "e3030d6cb6063b07a370df7ca9f178097d564200",
+    "ad4b975ca03baec7573394f8dcecc5cd4cf8069c",
+    "f89246d4afb8371cc28d50fb1efa0d5fa1b36ad3"
+  ],
+  "notes": [],
+  "discovered": [],
+  "stage": "fix",
+  "reviews": {},
+  "comments": {},
+  "stage_reviews": {},
+  "created_at": "2026-11-13T07:51:30.688508+00:00",
+  "updated_at": "2026-11-13T07:55:24.219073+00:00"
+}
