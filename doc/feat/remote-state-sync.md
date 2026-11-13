@@ -151,3 +151,82 @@
 6. 用旧 `base` 发 `PUT` → `409`，服务端数据不变
 7. 流式生成期间观察网络：不产生 `PUT`；生成结束后产生一次
 8. 后端不可达时页面仍可用（降级到 localStorage）
+
+---
+
+## 实现与校验结果
+
+### 落地清单
+
+| 文件 | 作用 |
+|---|---|
+| `server/store.ts` | 原子读写 `state.json`；损坏/缺失一律按空处理 |
+| `server/index.ts` | Hono：`GET/PUT /api/state`、`/api/health`、静态产物与 SPA 回落 |
+| `src/lib/storage.ts` | 新增 `fetchRemoteState` / `pushRemoteState` / `hasStreamingMessage` / `normalizeLoaded`（从 `loadState` 抽出，供本地与服务端复用） |
+| `src/hooks/use-chat-store.ts` | 启动拉取覆盖；状态变化防抖 800ms 推送；流式跳过；409 覆盖 + 提示 |
+| `src/vite-env.d.ts` | 声明编译期开关 `__REMOTE_SYNC__` |
+| `vite.config.ts` | `define` 注入开关；dev 默认关闭同步，`VITE_API_PROXY` 才开 |
+| `Dockerfile` | nginx 单容器 → `node:22-alpine` 单容器 + `VOLUME /app/data` |
+| `README.md` | 部署章节重写，新增「部署注意事项」10 条 |
+| `scripts/test-remote-state.cjs` | 9 个用例，自带服务端生命周期管理 |
+
+### 与设计的偏差
+
+1. **接口多了一个 `GET /api/health`**：设计里没有，用于容器健康检查，
+   成本极低。
+2. **`PUT` 的 `base` 缺失返回 `400`**：设计要求带 `base`，实现上把「缺失」
+   也当非法请求，而不是默认 `0`——默认 `0` 会让忘记带参的客户端静默成功。
+3. **新增 `__REMOTE_SYNC__` 编译期开关**：设计未预见 dev 环境没有后端时
+   的请求噪声会打挂既有测试。详见下方坑 3。
+4. **`loadState` 的清洗逻辑抽成 `normalizeLoaded`**：服务端数据同样需要
+   清洗（可能来自另一端的旧版本），复用同一函数保证两条入口一致。
+
+### 测试结果
+
+`node scripts/test-remote-state.cjs` — **9/9 通过**
+
+| 用例 | 覆盖 |
+|---|---|
+| `serverEmpty` | 空服务端返回 `updatedAt:0, state:null` |
+| `serverPut` | 初始化、旧 base 得 409 且数据不变、正确 base 可更新 |
+| `serverBadRequest` | 缺 base / 坏 JSON / 数组体 → 400 |
+| `serverPersist` | 落盘结构完整；**重启进程后数据仍在** |
+| `serverStatic` | `/index.html` no-cache；未知路径回落 SPA |
+| `syncTwoDevices` | A 写入 → B 打开可见；B 修改 → A 刷新可见 |
+| `syncOfflineFallback` | `/api/state` 请求失败时降级本地，功能可用 |
+| `syncNoStalePushBack` | 拉取覆盖后不会被旧快照反写 |
+| `syncNoStreamingPush` | 流式期间无 PUT，结束后有 |
+
+回归（既有套件）：`test-quick-ask` 12/12、`test-native-control` 2/2、
+`test-quick-ask-safe-area` 9/9、`test-switch-primitive` 6/6。
+`test-board*` 因 Chromium 启动失败未跑（环境问题，与本次改动无关）。
+
+### 坑
+
+1. **`remoteReady` 用 ref 存 → 就绪后不触发补推。** ref 变化不引起渲染，
+   推送 effect 只依赖 `state`，于是「就绪前发生、之后没再改」的修改永远
+   推不上去。改 `useState` 并将其加入依赖数组。
+
+2. **「就绪前本地变更优先」会覆盖服务端真实数据。** 为保住等待期间的
+   用户操作曾加 `dirtyBeforeReadyRef`，但启动时的 `initDefault` effect
+   也会建默认项目、同样被打上脏标记，导致新设备用空库覆盖服务端全部对话
+   （用例 `syncNoStalePushBack` 复现）。结论：服务端有数据时一律以服务端
+   为准，不给就绪前变更开特例。
+
+3. **dev 接后端的 mock 是进程级共享，污染既有测试。** 既有用例只清
+   `localStorage` 再 reload，mock 里的数据会被拉回来（实测期望 1 条实际
+   6 条）。试过 `DELETE` 重置 + 清两次，仍有竞态（上一页面 800ms 防抖内的
+   挂起 PUT 落在 DELETE 之后）。最终用方案 B：编译期开关，dev 默认不启用。
+
+4. **测试脚本自身两个坑**：`stopServer()` 默认删状态文件，重启断言前必须
+   传 `keepFile`；`startServer()` 也默认清文件，重启时同样要跳过。
+   只 `kill` 不等待进程退出会 `EADDRINUSE`，旧进程继续应答导致读到旧状态。
+
+### 已知限制
+
+- 无鉴权：任何能访问端口的人都能读写全部对话与 API Key，必须靠部署层
+  （内网 / Basic Auth / 反代）拦住。
+- 单实例：`state.json` 整包读写、无文件锁，多副本会互相覆盖。
+- 409 时本地未落库的修改会丢失（已与用户确认可接受）。
+- 流式期间不落库，另一端生成过程中刷新看不到该回复。
+- 服务端被清空（换空卷）后，先打开的那一端会用其本地数据重新初始化。
