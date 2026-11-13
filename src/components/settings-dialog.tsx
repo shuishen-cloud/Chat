@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Switch } from "@/components/ui/switch"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -19,7 +20,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { DEFAULT_BASE_URL, DEFAULT_MODEL, MODELS } from "@/lib/types"
-import { cn } from "@/lib/utils"
 import type { ChatStore } from "@/hooks/use-chat-store"
 
 interface Props {
@@ -103,28 +103,19 @@ export function SettingsDialog({ open, onOpenChange, store }: Props) {
 
           <div className="flex items-start justify-between gap-3 rounded-lg border border-border p-3">
             <div className="min-w-0">
-              <Label className="text-sm">思考模式</Label>
+              <Label htmlFor="thinking-mode" className="text-sm">
+                思考模式
+              </Label>
               <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
                 关闭后不再显示思维链，请求也不会带上思考相关的非标参数。
               </p>
             </div>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={thinking}
-              onClick={() => setThinking((v) => !v)}
-              className={cn(
-                "relative h-5 w-9 shrink-0 rounded-full transition-colors",
-                thinking ? "bg-primary" : "bg-muted"
-              )}
-            >
-              <span
-                className={cn(
-                  "absolute top-0.5 size-4 rounded-full bg-background transition-transform",
-                  thinking ? "translate-x-4.5" : "translate-x-0.5"
-                )}
-              />
-            </button>
+            <Switch
+              id="thinking-mode"
+              className="mt-0.5"
+              checked={thinking}
+              onCheckedChange={setThinking}
+            />
           </div>
 
           <div className="flex flex-col gap-1.5">
