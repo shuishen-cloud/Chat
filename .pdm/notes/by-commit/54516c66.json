@@ -1,0 +1,39 @@
+{
+  "commit": "54516c66",
+  "notes": [
+    {
+      "commit": "54516c66",
+      "kind": "pitfall",
+      "title": "『锚点存在』和『锚点可达』是两件事，前者全绿不代表能点",
+      "detail": "前六条断言只校验 href 目标存在 id，不校验 id 是否被 href 指向。于是 47 个模块卡片 id 齐全、测试全绿，实际侧栏一个都点不到（目录只抽 h2/h3，模块是 div）。补第 7 条断言：遍历 .card[id]，要求每条至少被一条内联链接指向。新增断言后立刻抓出一个真实遗漏——m-ui-primitives 这张概括卡从未被任何链接引用。教训：可导航性要从『入口→目标』双向校验，单向只能证明一半。",
+      "author": "human:unknown",
+      "files": [
+        "scripts/test-doc-html.cjs"
+      ],
+      "severity": null,
+      "status": "noted",
+      "catches": [],
+      "verifications": [
+        {
+          "kind": "test",
+          "target": "scripts/test-doc-html.cjs",
+          "command": "",
+          "method": "node scripts/test-doc-html.cjs",
+          "script": "",
+          "expected": "打印「可达性：47 个模块卡片锚点均有链接指向」且 exit 0",
+          "note": "",
+          "cwd": "",
+          "last_run_at": null,
+          "last_status": "unknown",
+          "last_output": ""
+        }
+      ],
+      "issue_id": null,
+      "resolves": [],
+      "tags": [
+        "doc-html"
+      ],
+      "created_at": "2026-11-13T07:29:01.359106+00:00"
+    }
+  ]
+}
