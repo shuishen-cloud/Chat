@@ -105,6 +105,9 @@ node scripts/test-switch-primitive.cjs
   若后续觉得不够，可换 `bg-muted-foreground/30`，但那会偏离 shadcn 默认值。
 - 本组件目前仅供设置弹窗使用，未覆盖 `size` 变体；若画板等其他位置需要
   大号开关，再补 `size` prop。
+- 暗色主题下 `--primary` 变为近白，因此开启态是「浅轨道 + 深滑块」，与浅色主题
+  的「深轨道 + 白滑块」方向相反。这与 shadcn 官方 Switch 行为一致（暗色下开关
+  用亮色表达「开」），故保持不变；若团队希望两主题同向，需加 `dark:` 覆盖轨道色。
 
 ## 实现与校验结果
 
@@ -121,6 +124,14 @@ node scripts/test-switch-primitive.cjs
 |---|---|---|
 | 关闭 | 轨道与滑块同色，一片白，仅剩黑色轮廓 | 灰色轨道 `bg-input` + 白色滑块，边界清晰 |
 | 开启 | 滑块 18px 位移，右缘顶出 36px 轨道 | 深色轨道 `bg-primary` + 白色滑块，完整内嵌 |
+| 暗色开启 | 同手写缺陷 | 浅轨道 `primary` + 深滑块 `primary-foreground`，可辨 |
+
+滑块越界的精确读数（Playwright `getBoundingClientRect`）：
+
+| 版本 | 轨道区间 | 滑块区间 | 结论 |
+|---|---|---|---|
+| 修复前 | `[902.8, 937.4]` | `[937.4, 952.8]` | 滑块完全跑到轨道右侧**之外** |
+| 修复后 | `[905.6, 940.9]` | 内嵌 | 两态均在轨道内 |
 
 DOM 断言（Playwright 读取 `outerHTML`）确认：
 `role="switch"`、`aria-checked="true"`、`data-checked=""`、
@@ -139,12 +150,33 @@ DOM 断言（Playwright 读取 `outerHTML`）确认：
 3. **Base UI 的选中态属性是 `data-checked`，不是 `data-[state=checked]`**
    与 Radix 版本不同，直接套 shadcn 旧模板会整段样式失效。以
    `node_modules/@base-ui/react/*/stateAttributesMapping` 为准。
+4. **`transition-colors` 会让测试读到动画中间态**
+   切主题/切状态后立刻读 `getComputedStyle().backgroundColor`，可能拿到过渡中间值，
+   暗色用例因此一度报「亮度差 0.0」的假失败。读取前必须等过渡结束。
+5. **canvas `fillStyle` 对不支持的语法静默失败**
+   把颜色喂给 canvas 转 RGB 时，若语法不被接受，`fillStyle` 会**沿用上一次的值**
+   而不报错，导致两种颜色被读成同一个数。需先设哨兵色再校验是否被覆盖。
+
+### 测试有效性验证
+
+把实现 stash 掉（只保留测试）重跑：**3/6 通过**。失败项正是两个真实缺陷：
+
+| 用例 | 修复前 | 失败原因 |
+|---|---|---|
+| `thumbStaysInsideTrack` | ✗ | 滑块 `[937.4, 952.8]` 完全在轨道 `[902.8, 937.4]` 之外 |
+| `toggleByLabelClick` | ✗ | 点「思考模式」文字无反应（旧版 `Label` 无 `htmlFor`） |
+
+恢复实现后 **6/6 通过** —— 说明测试确实守住了这两个 bug，而非空转。
+
+> `trackAndThumbContrast` 在旧实现下也是绿的：`bg-muted` 与卡片背景实测有足够亮度差，
+> 关闭态并非「隐形」，真正不可辨的是**滑块与轨道**几乎同色。该用例保留为规范守卫，
+> 防止后续改坏配色。
 
 ### 验证
 
 ```bash
 npx tsc -b          # 无输出
-npx oxlint src/components/ui/switch.tsx src/components/settings-dialog.tsx
 npm run build       # ✓ built
-node scripts/test-switch-primitive.cjs   # 3/3
+node scripts/test-switch-primitive.cjs   # 6/6
+CASE=thinkingToggle node scripts/test-board.cjs   # 1/1（原有回归未破）
 ```

@@ -9,6 +9,7 @@ const { runAll } = require("./test-harness.cjs")
  *  3. 点击「思考模式」文字也能切换（label 关联，扩大点击热区）
  *  4. 两种状态下滑块都完整落在轨道内，不越界
  *  5. 切换结果能持久化到 thinkingEnabled
+ *  6. 暗色主题下同样不越界、轨道与滑块可区分
  *
  * 单独跑某例：CASE=名字 node scripts/test-switch-primitive.cjs
  */
@@ -39,14 +40,19 @@ async function geometry(t) {
     const cs = getComputedStyle(root)
     const hs = getComputedStyle(thumb)
 
-    // 浏览器可能把颜色折算成 oklab/oklch，统一画到 canvas 再读 RGB
-    const cv = document.createElement("canvas")
-    cv.width = cv.height = 1
-    const cx = cv.getContext("2d")
+    // 浏览器可能把颜色折算成 oklab/oklch。canvas 的 fillStyle 对不支持的语法会
+    // 静默忽略、沿用上一次的值，所以每次都要“先设哨兵再校验是否被接受”，
+    // 否则两种颜色会双双被读成同一个旧值（曾因此得到完全相同的亮度）
     const toRgb = (color) => {
-      cx.clearRect(0, 0, 1, 1)
-      cx.fillStyle = "#000"
+      const cv = document.createElement("canvas")
+      cv.width = cv.height = 1
+      const cx = cv.getContext("2d")
+      cx.fillStyle = "#ff00ee" // 哨兵：不会被真实颜色撞上
       cx.fillStyle = color
+      if (cx.fillStyle === "#ff00ee") {
+        // 语法不被接受 —— 退化为只比字符串，亮度差返回 -1 供断言直接报错
+        return -1
+      }
       cx.fillRect(0, 0, 1, 1)
       const [r8, g8, b8] = cx.getImageData(0, 0, 1, 1).data
       return 0.299 * r8 + 0.587 * g8 + 0.114 * b8
@@ -184,6 +190,53 @@ const cases = {
     await t.page.getByText("思考模式", { exact: true }).click()
     await t.settle()
     t.ok((await geometry(t)).checked, "再次点击文字回到开启")
+  },
+
+  /** 暗色主题：滑块仍不越界，且两态配色可区分（暗色下 primary 变亮，需单独守） */
+  async darkThemeUsable(t) {
+    await openSettingsFresh(t)
+    await t.page.evaluate(() => {
+      localStorage.setItem("theme", "dark")
+      document.documentElement.classList.add("dark")
+    })
+    await t.settle()
+    // next-themes 可能回写主题，先确认 .dark 真的落在 html 上
+    const isDark = await t.page.evaluate(() =>
+      document.documentElement.classList.contains("dark")
+    )
+    t.ok(isDark, "已进入暗色主题（html.dark）")
+    // 轨道带 transition-colors，切主题瞬间读数会落在中间态（甚至两色相同），等动画稳定
+    await t.page.waitForTimeout(400)
+
+    const on = await geometry(t)
+    t.ok(on.checked, "暗色下初始为开启")
+    t.ok(
+      on.thumb.left >= on.root.left - 0.5 &&
+        on.thumb.right <= on.root.right + 0.5,
+      `暗色开启态滑块在轨道内：[${on.thumb.left.toFixed(1)}, ${on.thumb.right.toFixed(
+        1
+      )}] ⊂ [${on.root.left.toFixed(1)}, ${on.root.right.toFixed(1)}]`
+    )
+    t.ok(
+      on.lumaGap >= 20,
+      `暗色开启态轨道与滑块可区分：亮度差 ${on.lumaGap.toFixed(1)}（需 ≥20）`
+    )
+
+    await t.page.locator(SWITCH).click()
+    await t.settle()
+    const off = await geometry(t)
+    t.ok(!off.checked, "暗色下切到关闭")
+    t.ok(
+      off.thumb.left >= off.root.left - 0.5 &&
+        off.thumb.right <= off.root.right + 0.5,
+      `暗色关闭态滑块在轨道内：[${off.thumb.left.toFixed(1)}, ${off.thumb.right.toFixed(
+        1
+      )}] ⊂ [${off.root.left.toFixed(1)}, ${off.root.right.toFixed(1)}]`
+    )
+    t.ok(
+      on.trackBg !== off.trackBg,
+      "暗色下开启/关闭轨道配色必须不同"
+    )
   },
 }
 
