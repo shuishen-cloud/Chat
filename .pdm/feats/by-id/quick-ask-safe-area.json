@@ -2,7 +2,7 @@
   "slug": "quick-ask-safe-area",
   "title": "追问气泡改贴选区右下角，并给悬浮窗留出原生浮条安全区",
   "kind": "fix",
-  "status": "draft",
+  "status": "closed",
   "doc": "feat/quick-ask-safe-area.md",
   "api": [
     "bottomSafeArea() -> number —— 视口底部需避让的高度"
@@ -36,14 +36,15 @@
     "9ddf98fbe43fa396db9e167a6e9bad25a73e92dd",
     "365553b39d9239a421d25ceb7f9ad6beece21801",
     "477ccfee383bff9674d586a930dd211e18e70bf6",
-    "faf2547a9cba062cd4a435910517673be4c89f95"
+    "faf2547a9cba062cd4a435910517673be4c89f95",
+    "5f9113a8b1ff73fc4fa7c209c194775929f32a2a"
   ],
   "notes": [],
   "discovered": [],
-  "stage": "fix",
+  "stage": "close",
   "reviews": {},
   "comments": {},
   "stage_reviews": {},
   "created_at": "2026-11-13T07:42:20.145539+00:00",
-  "updated_at": "2026-11-13T07:43:36.477154+00:00"
+  "updated_at": "2026-11-13T07:43:37.802203+00:00"
 }

@@ -1,0 +1,39 @@
+{
+  "commit": "faf2547a",
+  "notes": [
+    {
+      "commit": "faf2547a",
+      "kind": "problem",
+      "title": "先删实现再跑测试，才能证明测试不是空转",
+      "detail": "只跑「修复后通过」不能说明测试守住了 bug —— 可能断言写得太松。做法：git stash 掉实现只留测试，确认它变为失败且失败原因正是目标问题（bubble.x < sel.right、1920x720 底部余量 31px），再 pop 恢复。这是验证回归测试有效性的最低成本手段。",
+      "author": "human:unknown",
+      "files": [
+        "scripts/test-quick-ask-safe-area.cjs"
+      ],
+      "severity": "medium",
+      "status": "noted",
+      "catches": [],
+      "verifications": [
+        {
+          "kind": "command",
+          "target": "",
+          "command": "git stash push src/components/selection-quick-ask.tsx && npm run build && node scripts/test-quick-ask-safe-area.cjs",
+          "method": "暂存实现后重跑测试",
+          "script": "",
+          "expected": "5/9 通过（4 项失败），恢复实现后 9/9 通过",
+          "note": "",
+          "cwd": "",
+          "last_run_at": null,
+          "last_status": "unknown",
+          "last_output": ""
+        }
+      ],
+      "issue_id": null,
+      "resolves": [],
+      "tags": [
+        "ui/selection-quick-ask"
+      ],
+      "created_at": "2026-11-13T07:43:41.330746+00:00"
+    }
+  ]
+}
