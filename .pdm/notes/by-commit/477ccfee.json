@@ -1,0 +1,109 @@
+{
+  "commit": "477ccfee",
+  "notes": [
+    {
+      "commit": "477ccfee",
+      "kind": "pitfall",
+      "title": "浏览器原生 UI 在 WebView 之上，z-index 再高也盖不住",
+      "detail": "微信/QQ 内置浏览器的「AI 帮写」浮条、iOS 底栏都不是 DOM 的一部分，而是浏览器绘制在 WebView 合成层之上。页面里 position: fixed + 很高的 z-index + portal 全部无效。唯一可靠对策是避让：把需要交互的元素放在它不会去的位置（气泡贴选区右下、窗口贴视口上部），并在所有纵向边界计算里扣除安全区。",
+      "author": "human:unknown",
+      "files": [
+        "src/components/selection-quick-ask.tsx"
+      ],
+      "severity": "high",
+      "status": "noted",
+      "catches": [],
+      "verifications": [
+        {
+          "kind": "command",
+          "target": "",
+          "command": "APP_URL=http://127.0.0.1:5199/ node scripts/test-quick-ask-safe-area.cjs",
+          "method": "微信 UA 1920x720 下展开追问窗口，量 innerHeight - window.bottom",
+          "script": "",
+          "expected": "9/9 通过，1920x720 场景底部余量 >= 90px",
+          "note": "",
+          "cwd": "",
+          "last_run_at": null,
+          "last_status": "unknown",
+          "last_output": ""
+        }
+      ],
+      "issue_id": null,
+      "resolves": [],
+      "tags": [
+        "ui/selection-quick-ask"
+      ],
+      "created_at": "2026-11-13T07:43:26.326250+00:00"
+    },
+    {
+      "commit": "477ccfee",
+      "kind": "difficulty",
+      "title": "固定高度 + 紧跟选区，两个设计叠加把窗口推到屏幕底部",
+      "detail": "原实现同时用了 h=460 的固定高度和 y=clamp(rect.top+12, 8, vh-h-8) 的跟随定位。视口高度小于约 468 时，clamp 的上界会把 y 强制压到接近 0 甚至溢出；在大视口上选中靠下文本时，y 被夹到 vh-468，窗口底边直接贴住视口下缘。修复：高度改为 min(460, max(MIN_H, vh-safe-24))，y 改为 max(vh*0.16, rect.top+12) 并以 vh-safe-h 为上限，两处都按可用高度自适应。",
+      "author": "human:unknown",
+      "files": [
+        "src/components/selection-quick-ask.tsx"
+      ],
+      "severity": "medium",
+      "status": "noted",
+      "catches": [],
+      "verifications": [
+        {
+          "kind": "test",
+          "target": "scripts/test-quick-ask-safe-area.cjs::windowAvoidsNativeBar",
+          "command": "",
+          "method": "对比 1920x900 与 1920x720 两个视口的底部余量",
+          "script": "",
+          "expected": "修复前 1920x720 余量 31px，修复后 >= 96px",
+          "note": "",
+          "cwd": "",
+          "last_run_at": null,
+          "last_status": "unknown",
+          "last_output": ""
+        }
+      ],
+      "issue_id": null,
+      "resolves": [],
+      "tags": [
+        "ui/selection-quick-ask"
+      ],
+      "created_at": "2026-11-13T07:43:28.960911+00:00"
+    },
+    {
+      "commit": "477ccfee",
+      "kind": "controlled-exception",
+      "title": "安全区高度是固定估算值，不同微信版本可能仍需微调",
+      "detail": "bottomSafeArea() 对微信/QQ 内置浏览器固定返回 96px，依据是用户截图中浮条的高度估算。不同微信版本、不同机型（尤其折叠屏/平板横竖屏）浮条高度可能不同。若真机仍被压住，需要按实际测量值调整，或改为从 window.visualViewport 差值推算（但浮条不属于 visualViewport 变化，无法精确测）。已在设计文档「已知限制」中登记。",
+      "author": "human:unknown",
+      "files": [
+        "src/components/selection-quick-ask.tsx"
+      ],
+      "severity": "low",
+      "status": "noted",
+      "catches": [
+        "NativeBarHeightGuess"
+      ],
+      "verifications": [
+        {
+          "kind": "manual",
+          "target": "",
+          "command": "",
+          "method": "",
+          "script": "",
+          "expected": "",
+          "note": "在目标平板微信中划词展开追问窗，确认输入框完整可见；若仍被压，记录浮条实际高度并调整 bottomSafeArea 返回值",
+          "cwd": "",
+          "last_run_at": null,
+          "last_status": "unknown",
+          "last_output": ""
+        }
+      ],
+      "issue_id": null,
+      "resolves": [],
+      "tags": [
+        "ui/selection-quick-ask"
+      ],
+      "created_at": "2026-11-13T07:43:31.570575+00:00"
+    }
+  ]
+}

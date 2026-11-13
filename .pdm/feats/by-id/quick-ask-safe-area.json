@@ -1,0 +1,49 @@
+{
+  "slug": "quick-ask-safe-area",
+  "title": "追问气泡改贴选区右下角，并给悬浮窗留出原生浮条安全区",
+  "kind": "fix",
+  "status": "draft",
+  "doc": "feat/quick-ask-safe-area.md",
+  "api": [
+    "bottomSafeArea() -> number —— 视口底部需避让的高度"
+  ],
+  "logs": [
+    "无：不产生运行时日志"
+  ],
+  "fallbacks": [
+    "非微信/iOS 环境安全区为 12px，行为与改造前基本一致；气泡宽度 BUBBLE_W=220 为估算值，靠右时保守左移避免溢出"
+  ],
+  "design_note": "微信/QQ 内置浏览器的「AI 帮写」浮条是浏览器原生 UI，绘制在 WebView 合成层之上，页面里 z-index 再高也盖不住，只能避让。原实现把追问气泡放在选区正上方居中、展开窗紧跟选区，选中文本靠下时窗口被挤到视口底部，输入框正好被浮条压住。参考 CodeReader 的做法：气泡贴选区右下方（rect.right + 6 / rect.bottom + 6），展开窗贴视口上部 16% 而不是紧跟选区，并在所有纵向边界上扣除 bottomSafeArea()。",
+  "impl_note": "新增 bottomSafeArea()：微信/QQ 内置浏览器 UA 96px，iOS 24px，其他 12px。气泡锚点从「选区中心 + translate 上移」改为「选区右边缘 + 下边缘」，去掉 -translate-x-1/2 -translate-y-full，贴底时翻到选区上方。展开窗高度改为 min(460, vh - safe - 24)，y 改为 max(vh*0.16, rect.top+12)；拖拽上限与缩放上限同样扣除安全区。",
+  "data_model": [
+    "无：仅定位计算，无新增数据结构"
+  ],
+  "samples": [
+    "无：纯几何计算，无外部数据"
+  ],
+  "changes": [
+    "src/components/selection-quick-ask.tsx::bottomSafeArea —— 新增工具函数",
+    "src/components/selection-quick-ask.tsx::SelectionQuickAsk 气泡锚点 —— 改为选区右下角，贴底翻转",
+    "src/components/selection-quick-ask.tsx::SelectionQuickAsk 展开窗初始位置 —— 高度与 y 扣除安全区，贴上部 16%",
+    "src/components/selection-quick-ask.tsx::onHeaderPointerMove/onResizeMove —— 纵向边界扣除安全区"
+  ],
+  "test_note": "Playwright 以微信 UA 与普通 UA 分别在 1920x900、1920x720 下选中文本，断言气泡 left >= 选区 right 且 top >= 选区 bottom；展开后断言窗口 bottom <= vh - 90；另加选区贴右下角的翻转用例；并回归 scripts/test-quick-ask.cjs 全量 12 例",
+  "debug_note": "",
+  "extend_note": "",
+  "impact": "仅影响划词追问气泡与悬浮窗的初始位置与可拖范围；追问功能本身、多窗口错开、拖动缩放交互不变",
+  "importance": "high",
+  "commits": [
+    "9ddf98fbe43fa396db9e167a6e9bad25a73e92dd",
+    "365553b39d9239a421d25ceb7f9ad6beece21801",
+    "477ccfee383bff9674d586a930dd211e18e70bf6",
+    "faf2547a9cba062cd4a435910517673be4c89f95"
+  ],
+  "notes": [],
+  "discovered": [],
+  "stage": "fix",
+  "reviews": {},
+  "comments": {},
+  "stage_reviews": {},
+  "created_at": "2026-11-13T07:42:20.145539+00:00",
+  "updated_at": "2026-11-13T07:43:36.477154+00:00"
+}
