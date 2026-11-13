@@ -1,0 +1,51 @@
+{
+  "slug": "architecture-html",
+  "title": "可索引的 HTML 系统文档：覆盖全部组件与总体运行脉络",
+  "kind": "feat",
+  "status": "closed",
+  "doc": "feat/architecture-html.md",
+  "api": [
+    "无（静态文档，无运行时 API）"
+  ],
+  "logs": [
+    "无（静态资源）"
+  ],
+  "fallbacks": [
+    "JS 不可用时：侧栏目录与锚点链接仍为原生 a 标签，可正常跳转；搜索框降级为无过滤但不报错；样式全部本地内联，无 CDN 依赖，断网可读"
+  ],
+  "design_note": "Markdown 文档只能线性阅读，组件一多就找不到东西。需要一份有目录、可锚点跳转、可搜索、离线可开的多页 HTML 文档：先给系统总体运行脉络，再按「入口层/状态层/对话/画板/UI 基座」分层列出每个模块的职责、输入输出与依赖，最后附数据模型与术语表。刻意不引任何外部 CDN，单文件内联 CSS/JS，双击即可打开，也可部署到静态服务器。",
+  "impl_note": "在 doc/html/ 下生成静态页面：index.html（总体脉络 + 全模块索引表）+ modules.html（分层模块详情）+ assets/doc.css + assets/doc.js。侧边栏目录树、顶部搜索过滤、滚动锚点高亮。内容手写静态 HTML，不引入构建步骤，避免文档随 Vite 版本漂移。",
+  "data_model": [
+    "纯静态：doc/html/*.html；页面内锚点由 h2/h3 的 id 生成；搜索索引在页面加载时从 DOM 抽取，无外部数据文件"
+  ],
+  "samples": [
+    "无：纯静态文档，无外部数据输入"
+  ],
+  "changes": [
+    "doc/html/index.html —— 新增：总体运行脉络 + 全模块索引",
+    "doc/html/modules.html —— 新增：按层的模块职责详情",
+    "doc/html/assets/doc.css —— 新增：共享样式（主题/侧栏/目录）",
+    "doc/html/assets/doc.js —— 新增：搜索过滤、锚点高亮、侧栏折叠",
+    "scripts/test-doc-html.cjs —— 新增：文档覆盖度与死链校验"
+  ],
+  "test_note": "node scripts/test-doc-html.cjs：断言每个 src/ 下的模块都在文档中出现（覆盖度）、所有内部链接与锚点均可解析（无死链）、页面无外部 CDN 引用、JS 关闭时目录链接仍为原生 a 标签",
+  "debug_note": "",
+  "extend_note": "",
+  "impact": "仅新增 doc/ 下的静态文件与一条测试脚本，不改动任何 src/ 代码、不影响构建产物与运行时行为",
+  "importance": "high",
+  "commits": [
+    "6c52a6b7caefb0aa307beaf7b1ab0ed28b3773db",
+    "4354c7346373da8a37dcf73f8809a43b8e0ab14c",
+    "7697e376c0e6110e69acda2aafb72967ae6d6496",
+    "54516c66b3ce6813f6c974b5b5bee648b26a399d",
+    "4c7270596d97df11fb27cbdbb7b83c0bb1c049ba"
+  ],
+  "notes": [],
+  "discovered": [],
+  "stage": "close",
+  "reviews": {},
+  "comments": {},
+  "stage_reviews": {},
+  "created_at": "2026-11-13T07:23:48.441700+00:00",
+  "updated_at": "2026-11-13T07:29:06.306177+00:00"
+}

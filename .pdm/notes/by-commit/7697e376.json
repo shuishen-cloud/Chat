@@ -1,0 +1,141 @@
+{
+  "commit": "7697e376",
+  "notes": [
+    {
+      "commit": "7697e376",
+      "kind": "pitfall",
+      "title": "CSS 选择器多一个逗号，静默吞掉后续整条规则",
+      "detail": "为 .sidebar li[hidden] 写 display:none 时行尾误留逗号，CSS 解析器把 '.sidebar li[hidden]{...}' 与后面的 '.no-result{...}' 合并成一条无效选择器列表，导致 no-result 的 display:none 完全失效——不报错、不警告，只是侧栏底部常驻『没有匹配的条目』。截图才发现。教训：CSS 语法错误不抛异常，改样式后必须看渲染结果而不是只看 diff。",
+      "author": "human:unknown",
+      "files": [
+        "doc/html/assets/doc.css"
+      ],
+      "severity": null,
+      "status": "noted",
+      "catches": [],
+      "verifications": [
+        {
+          "kind": "manual",
+          "target": "",
+          "command": "",
+          "method": "",
+          "script": "",
+          "expected": "",
+          "note": "打开 doc/html/index.html，侧栏底部不应出现「没有匹配的条目」；输入 zzz 后应出现",
+          "cwd": "",
+          "last_run_at": null,
+          "last_status": "unknown",
+          "last_output": ""
+        }
+      ],
+      "issue_id": null,
+      "resolves": [],
+      "tags": [
+        "doc-html"
+      ],
+      "created_at": "2026-11-13T07:28:16.071594+00:00"
+    },
+    {
+      "commit": "7697e376",
+      "kind": "pitfall",
+      "title": "grid 的 1fr 会被内容固有宽度撑破，必须写 minmax(0,1fr)",
+      "detail": "模块详情页 <dl> 用 grid-template-columns: 74px 1fr，<dd> 里含长代码串与 <br> 时列宽被撑到内容固有宽度，整页出现 133px 横向滚动（1400 视口 scrollWidth=1533）。1fr 的实际含义是 minmax(auto,1fr)，auto 的 min-width 等于内容最小宽度，所以不会退让。改成 minmax(0,1fr) 并给 dd 加 min-width:0 + overflow-wrap:anywhere 后消除。",
+      "author": "human:unknown",
+      "files": [
+        "doc/html/assets/doc.css"
+      ],
+      "severity": null,
+      "status": "noted",
+      "catches": [],
+      "verifications": [
+        {
+          "kind": "manual",
+          "target": "",
+          "command": "",
+          "method": "",
+          "script": "",
+          "expected": "",
+          "note": "打开 doc/html/modules.html，documentElement.scrollWidth 应等于 clientWidth（无横向滚动）",
+          "cwd": "",
+          "last_run_at": null,
+          "last_status": "unknown",
+          "last_output": ""
+        }
+      ],
+      "issue_id": null,
+      "resolves": [],
+      "tags": [
+        "doc-html"
+      ],
+      "created_at": "2026-11-13T07:28:18.678824+00:00"
+    },
+    {
+      "commit": "7697e376",
+      "kind": "difficulty",
+      "title": "模块是 div 不是标题，目录抽取只认 h2/h3 会让模块无法从侧栏直达",
+      "detail": "设计里定的是『目录在加载时从 DOM 抽取 h2/h3』，但模块详情的每个模块是 .card[id]（div），不是标题。结果侧栏目录里只有 L0-L5 六个分组，47 个模块一个都点不到——测试全绿，因为测试只校验锚点存在性，不校验可达性。改为同时抽取 '.card[id]' 并取 .card-head .name 作为目录文字后，modules.html 目录从 8 条变成 55 条（47 模块 + 8 标题）。",
+      "author": "human:unknown",
+      "files": [
+        "doc/html/assets/doc.js"
+      ],
+      "severity": null,
+      "status": "noted",
+      "catches": [],
+      "verifications": [
+        {
+          "kind": "manual",
+          "target": "",
+          "command": "",
+          "method": "",
+          "script": "",
+          "expected": "",
+          "note": "打开 doc/html/modules.html，侧栏应能直接点到 src/hooks/use-chat-store.ts",
+          "cwd": "",
+          "last_run_at": null,
+          "last_status": "unknown",
+          "last_output": ""
+        }
+      ],
+      "issue_id": null,
+      "resolves": [],
+      "tags": [
+        "doc-html"
+      ],
+      "created_at": "2026-11-13T07:28:21.403144+00:00"
+    },
+    {
+      "commit": "7697e376",
+      "kind": "problem",
+      "title": "覆盖度校验用字符串匹配：通配符『ui/*.tsx』骗过测试",
+      "detail": "第一版 modules.html 用一条『src/components/ui/*.tsx（14 个）』概括全部 UI 原语，run 测试直接报 14 个文件未覆盖——因为测试找的是完整路径 'src/components/ui/button.tsx' 这样的字符串。中途我把它们列成一段纯文字（a · b · c），测试仍红：字符串匹配不等于可索引。最终改成每个文件一行表格 + 各自的 id 锚点，测试转绿且真的可跳转。结论：覆盖度测试虽然实现简单（substring），但它逼出的是『可索引』这个真实需求，比人工检查可靠。",
+      "author": "human:unknown",
+      "files": [
+        "scripts/test-doc-html.cjs"
+      ],
+      "severity": null,
+      "status": "noted",
+      "catches": [],
+      "verifications": [
+        {
+          "kind": "test",
+          "target": "scripts/test-doc-html.cjs",
+          "command": "",
+          "method": "node scripts/test-doc-html.cjs",
+          "script": "",
+          "expected": "exit 0 且打印「src/ 全部 58 个源文件均已在文档中出现」",
+          "note": "",
+          "cwd": "",
+          "last_run_at": null,
+          "last_status": "unknown",
+          "last_output": ""
+        }
+      ],
+      "issue_id": null,
+      "resolves": [],
+      "tags": [
+        "doc-html"
+      ],
+      "created_at": "2026-11-13T07:28:24.796318+00:00"
+    }
+  ]
+}
